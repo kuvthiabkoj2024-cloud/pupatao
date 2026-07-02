@@ -122,7 +122,6 @@ export default function AdminNotifications() {
   const busy = fetcher.state !== 'idle'
 
   const [message, setMessage] = useState('')
-  const [schedule, setSchedule] = useState<'now' | 'once' | 'daily'>('now')
   const msgRef = useRef<HTMLTextAreaElement>(null)
 
   // Toast on completion, then reset the composer.
@@ -182,7 +181,8 @@ export default function AdminNotifications() {
         {/* ── Composer ── */}
         <fetcher.Form method="post" className="flex flex-col gap-3 rounded-2xl p-4" style={panel}>
           <input type="hidden" name="op" value="create" />
-          <input type="hidden" name="schedule" value={schedule} />
+          {/* Scheduling removed (no cron on this plan) — always send immediately. */}
+          <input type="hidden" name="schedule" value="now" />
           <input type="hidden" name="message" value={message} />
 
           <div className="text-sm font-bold" style={{ color: '#e9d5ff' }}>{t('admin.notifications.compose')}</div>
@@ -233,27 +233,6 @@ export default function AdminNotifications() {
             </div>
           )}
 
-          {/* Schedule */}
-          <label className="mt-1 text-[10px] font-semibold" style={{ color: '#a5b4fc' }}>{t('admin.notifications.schedule')}</label>
-          <div className="grid grid-cols-3 gap-1.5">
-            <ScheduleTab active={schedule === 'now'} onClick={() => setSchedule('now')} icon={<Send size={13} />} label={t('admin.notifications.sendNow')} />
-            <ScheduleTab active={schedule === 'once'} onClick={() => setSchedule('once')} icon={<CalendarClock size={13} />} label={t('admin.notifications.scheduleOnce')} />
-            <ScheduleTab active={schedule === 'daily'} onClick={() => setSchedule('daily')} icon={<Repeat size={13} />} label={t('admin.notifications.daily')} />
-          </div>
-
-          {schedule === 'once' && (
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px]" style={{ color: '#a5b4fc' }}>{t('admin.notifications.dateTime')}</label>
-              <input name="scheduledAt" type="datetime-local" required className="rounded-lg px-3 py-2 text-xs outline-none" style={field} />
-            </div>
-          )}
-          {schedule === 'daily' && (
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px]" style={{ color: '#a5b4fc' }}>{t('admin.notifications.timeOfDay')}</label>
-              <input name="timeOfDay" type="time" required defaultValue="09:00" className="rounded-lg px-3 py-2 text-xs outline-none" style={field} />
-            </div>
-          )}
-
           <button
             type="submit"
             disabled={busy || !message.trim()}
@@ -261,7 +240,7 @@ export default function AdminNotifications() {
             style={{ background: 'linear-gradient(135deg,#4338ca,#312e81)', color: '#fff', border: '1px solid #818cf8' }}
           >
             {busy ? <Loader size={14} className="animate-spin" /> : <Send size={14} />}
-            {busy ? t('admin.notifications.sending') : t('admin.notifications.create')}
+            {busy ? t('admin.notifications.sending') : t('admin.notifications.sendNow')}
           </button>
         </fetcher.Form>
 
@@ -279,22 +258,6 @@ export default function AdminNotifications() {
         </div>
       </div>
     </div>
-  )
-}
-
-function ScheduleTab({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex flex-col items-center gap-1 rounded-lg px-2 py-2 text-[10px] font-bold transition-colors"
-      style={active
-        ? { background: '#4338ca', color: '#fff', border: '1px solid #818cf8' }
-        : { background: '#1e1b4b', color: '#a5b4fc', border: '1px solid #312e81' }}
-    >
-      {icon}
-      <span className="text-center leading-tight">{label}</span>
-    </button>
   )
 }
 
