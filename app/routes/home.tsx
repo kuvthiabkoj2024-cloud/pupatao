@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, memo, type ReactNode } from 'react'
+import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef, memo, type ReactNode } from 'react'
 import confetti from 'canvas-confetti'
 import { Form, Link, useFetcher, useLoaderData, useOutletContext, useRevalidator, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
@@ -161,17 +161,36 @@ function loadYtApi(): Promise<void> {
   return ytApiPromise
 }
 
+// Imperative handle so the parent's sound button can drive play/unmute
+// SYNCHRONOUSLY inside the tap — iOS only honors media start when play() is
+// called in the click's own call stack (a useEffect fires too late).
+type YtHandle = { setSound: (muted: boolean) => void }
+
 // YouTube live player driven by the IFrame API (not a plain iframe) so we can:
 //   • autoplay muted with NO visible controls (controls:0), and
 //   • prevent pausing — any user-initiated PAUSE is immediately resumed, so the
 //     live feed can't be stopped or scrubbed.
 // The one thing iOS still forces: if the OS blocks autoplay (e.g. Low Power
 // Mode) the poster + play button shows until the first tap — unavoidable.
-function YouTubeLivePlayer({ videoId, muted, className }: { videoId: string; muted: boolean; className?: string }) {
+const YouTubeLivePlayer = forwardRef<YtHandle, { videoId: string; muted: boolean; className?: string }>(
+  function YouTubeLivePlayer({ videoId, muted, className }, ref) {
   const hostRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<YtPlayer | null>(null)
   const mutedRef = useRef(muted)
   mutedRef.current = muted
+
+  // Called straight from the sound button's onClick (a real user gesture).
+  useImperativeHandle(ref, () => ({
+    setSound(m: boolean) {
+      const p = playerRef.current
+      if (!p) return
+      try {
+        if (m) p.mute()
+        else p.unMute()
+        p.playVideo()
+      } catch { /* player not ready */ }
+    },
+  }), [])
 
   useEffect(() => {
     let cancelled = false
@@ -209,18 +228,150 @@ function YouTubeLivePlayer({ videoId, muted, className }: { videoId: string; mut
     }
   }, [videoId])
 
-  // Reflect the app's mute toggle onto the player.
+  // Reflect the app's sound button onto the player. Tapping it also (re)starts
+  // playback, so the customer never has to find YouTube's own play button —
+  // even if the OS blocked autoplay, this tap is the gesture that starts it.
   useEffect(() => {
     const p = playerRef.current
     if (!p) return
     try {
       if (muted) p.mute()
-      else { p.unMute(); p.playVideo() }
+      else p.unMute()
+      p.playVideo()
     } catch { /* player not ready */ }
   }, [muted])
 
   return <div ref={hostRef} className={className} style={{ pointerEvents: 'auto' }} />
+})
+
+// ── Facebook JS SDK player (Android/desktop only) ───────────────────────────
+// The plain plugins/video.php iframe gives us no control (no API, no mute
+// param). The JS SDK returns a `player` object with play/pause/mute/unmute +
+// events, which lets us build our OWN control bar. We use it only on non-iOS —
+// on iOS FB won't play inline regardless, so that path keeps the plugin frame +
+// "Watch on Facebook" card.
+type FbPlayer = {
+  play: () => void
+  pause: () => void
+  mute: () => void
+  unmute: () => void
+  subscribe: (event: string, cb: () => void) => void
 }
+type FbReadyMsg = { type: string; instance?: FbPlayer; target?: HTMLElement }
+declare global {
+  interface Window {
+    FB?: {
+      init: (opts: { xfbml?: boolean; version: string }) => void
+      XFBML: { parse: (el?: HTMLElement) => void }
+      Event: {
+        subscribe: (event: string, cb: (msg: FbReadyMsg) => void) => void
+        unsubscribe: (event: string, cb: (msg: FbReadyMsg) => void) => void
+      }
+    }
+  }
+}
+let fbSdkPromise: Promise<void> | null = null
+function loadFbSdk(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.reject(new Error('SSR'))
+  if (window.FB) return Promise.resolve()
+  if (fbSdkPromise) return fbSdkPromise
+  fbSdkPromise = new Promise<void>((resolve, reject) => {
+    if (!document.getElementById('fb-root')) {
+      const root = document.createElement('div')
+      root.id = 'fb-root'
+      document.body.appendChild(root)
+    }
+    const script = document.createElement('script')
+    script.id = 'fb-sdk-script'
+    script.src = 'https://connect.facebook.net/en_US/sdk.js'
+    script.async = true
+    script.defer = true
+    script.crossOrigin = 'anonymous'
+    script.onload = () => { window.FB?.init({ xfbml: false, version: 'v19.0' }); resolve() }
+    script.onerror = () => { fbSdkPromise = null; reject(new Error('fb sdk load failed')) }
+    document.body.appendChild(script)
+  })
+  return fbSdkPromise
+}
+
+// Imperative handle so the parent's custom control bar drives the FB player.
+type FbHandle = {
+  play: () => void
+  pause: () => void
+  mute: () => void
+  unmute: () => void
+  fullscreen: () => void
+}
+const FacebookSdkPlayer = forwardRef<FbHandle, {
+  rawUrl: string
+  width: number
+  onPlayingChange?: (playing: boolean) => void
+  className?: string
+}>(function FacebookSdkPlayer({ rawUrl, width, onPlayingChange, className }, ref) {
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const mountRef = useRef<HTMLDivElement>(null)
+  const playerRef = useRef<FbPlayer | null>(null)
+
+  useImperativeHandle(ref, () => ({
+    play() { try { playerRef.current?.play() } catch { /* not ready */ } },
+    pause() { try { playerRef.current?.pause() } catch { /* not ready */ } },
+    mute() { try { playerRef.current?.mute() } catch { /* not ready */ } },
+    unmute() { try { playerRef.current?.unmute() } catch { /* not ready */ } },
+    fullscreen() { wrapRef.current?.requestFullscreen?.().catch(() => { /* denied */ }) },
+  }), [])
+
+  useEffect(() => {
+    let cancelled = false
+    let handler: ((msg: FbReadyMsg) => void) | null = null
+    const init = () => {
+      if (cancelled || !window.FB || !mountRef.current) return
+      handler = (msg: FbReadyMsg) => {
+        if (cancelled || msg.type !== 'video' || !msg.instance) return
+        // Only capture the player rendered inside OUR mount (event is global).
+        if (msg.target && !mountRef.current?.contains(msg.target)) return
+        const p = msg.instance
+        playerRef.current = p
+        try {
+          p.subscribe('startedPlaying', () => onPlayingChange?.(true))
+          p.subscribe('paused', () => onPlayingChange?.(false))
+          p.subscribe('finishedPlaying', () => onPlayingChange?.(false))
+        } catch { /* events unsupported */ }
+      }
+      window.FB.Event.subscribe('xfbml.ready', handler)
+      window.FB.XFBML.parse(mountRef.current)
+    }
+    if (window.FB) init()
+    else loadFbSdk().then(init).catch(() => { /* SDK blocked */ })
+    return () => {
+      cancelled = true
+      if (handler && window.FB) window.FB.Event.unsubscribe('xfbml.ready', handler)
+    }
+    // Parse once per mount — `width` is only read for the initial data-width and
+    // must not re-trigger a parse (which would spawn a duplicate player).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawUrl, onPlayingChange])
+
+  return (
+    <div ref={wrapRef} className={className} style={{ background: 'black' }}>
+      <div
+        ref={mountRef}
+        className="flex h-full w-full items-center justify-center overflow-hidden"
+        style={{ WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
+      >
+        <div
+          className="fb-video"
+          data-href={rawUrl}
+          data-width={width}
+          data-allowfullscreen="true"
+          data-autoplay="true"
+          data-show-text="false"
+          data-show-captions="false"
+          style={{ width: '100%', height: '100%' }}
+        />
+      </div>
+    </div>
+  )
+})
 
 // HLS-aware video element. Uses HLS.js in Chrome/Firefox/Edge and native
 // HLS in Safari. The hlsRef holds the instance across async resolution so
@@ -353,6 +504,11 @@ const LiveStreamBox = memo(function LiveStreamBox({
   // iOS Safari can't play FB Live inline → offer "open in Facebook app" instead.
   const [isIos, setIsIos] = useState(false)
   useEffect(() => { setIsIos(detectIos()) }, [])
+  // Lets the sound button drive the YouTube player synchronously (iOS gesture).
+  const ytRef = useRef<YtHandle | null>(null)
+  // Facebook (SDK) mute control — Android/desktop only.
+  const fbRef = useRef<FbHandle | null>(null)
+  const [fbMuted, setFbMuted] = useState(true)
   const [isBuffering, setIsBuffering] = useState(false)
   // Browsers require muted autoplay on mobile. Customers tap the speaker
   // button to unmute, which counts as a user gesture.
@@ -364,6 +520,7 @@ const LiveStreamBox = memo(function LiveStreamBox({
   const reload = useCallback(() => {
     setIsBuffering(false)
     setIframeKey(k => k + 1)
+    setFbMuted(true)
   }, [])
 
   useEffect(() => {
@@ -377,6 +534,7 @@ const LiveStreamBox = memo(function LiveStreamBox({
   useEffect(() => {
     setIsBuffering(false)
     setIframeKey(k => k + 1)
+    setFbMuted(true)
   }, [rawUrl])
 
   // Clear the stall timer on unmount.
@@ -466,29 +624,22 @@ const LiveStreamBox = memo(function LiveStreamBox({
           onTimeUpdate={disarmStallTimer}
           onError={armStallTimer}
         />
-      ) : fbEmbedSrc ? (
-        // Facebook: our own plugins/video.php iframe. The `allow` attribute is
-        // the key fix — a cross-origin iframe only plays media when the host
-        // grants `autoplay; encrypted-media`, which FB's own SDK-injected iframe
-        // never sets (→ black video). On Android/desktop this plays inline.
-        //
-        // iOS is different: Apple + Facebook block inline playback of FB Live no
-        // matter what (the embed loads a frame but the native ▶ never starts).
-        // So on iOS we keep the iframe as a live backdrop frame and overlay a
-        // tappable button that opens the stream in the Facebook app, where it
-        // plays perfectly. Betting keeps working in-app via Pusher regardless.
-        <>
-          <iframe
-            key={`${iframeKey}-${isMuted ? 'm' : 'u'}`}
-            src={fbEmbedSrc}
-            className="h-full w-full"
-            style={{ border: 'none', display: 'block', pointerEvents: isIos ? 'none' : 'auto' }}
-            allow="autoplay; encrypted-media; clipboard-write; picture-in-picture; fullscreen"
-            allowFullScreen
-            scrolling="no"
-            title="Live stream"
-          />
-          {isIos && rawUrl && (
+      ) : fbEmbedSrc && rawUrl ? (
+        isIos ? (
+          // iOS: Facebook can't play inline (Apple + FB block it). Show the
+          // plugin frame as a backdrop + a tappable "Watch on Facebook" card
+          // that opens the FB app, where it plays. Betting stays live via Pusher.
+          <>
+            <iframe
+              key={iframeKey}
+              src={fbEmbedSrc}
+              className="h-full w-full"
+              style={{ border: 'none', display: 'block', pointerEvents: 'none' }}
+              allow="autoplay; encrypted-media; clipboard-write; picture-in-picture; fullscreen"
+              allowFullScreen
+              scrolling="no"
+              title="Live stream"
+            />
             <a
               href={rawUrl}
               target="_blank"
@@ -497,23 +648,51 @@ const LiveStreamBox = memo(function LiveStreamBox({
               style={{ background: 'rgba(0,0,0,0.45)' }}
               aria-label={t('live.watchOnFacebook')}
             >
-              <span
-                className="flex h-20 w-20 items-center justify-center rounded-full text-4xl shadow-2xl"
-                style={{ background: 'rgba(24,119,242,0.95)', color: '#fff', paddingLeft: 6 }}
-              >
-                ▶
-              </span>
+              <span className="flex h-20 w-20 items-center justify-center rounded-full text-4xl shadow-2xl"
+                style={{ background: 'rgba(24,119,242,0.95)', color: '#fff', paddingLeft: 6 }}>▶</span>
               <span className="rounded-full px-4 py-1.5 text-sm font-bold" style={{ background: 'rgba(24,119,242,0.95)', color: '#fff' }}>
                 {t('live.watchOnFacebook')}
               </span>
             </a>
-          )}
-        </>
+          </>
+        ) : fbWidth === null ? (
+          // Wait for the container width so the FB plugin renders at the right
+          // size on first parse (it uses a fixed pixel width, not %).
+          <div className="h-full w-full" style={{ background: 'black' }} />
+        ) : (
+          // Android / desktop: FB JS SDK player + OUR custom control bar (top,
+          // above the Reload button). These drive the SDK player directly, so
+          // only mute works for Facebook.
+          <>
+            <FacebookSdkPlayer
+              ref={fbRef}
+              key={iframeKey}
+              rawUrl={rawUrl}
+              width={fbWidth}
+              className="h-full w-full"
+            />
+            <button
+              type="button"
+              onClick={() => { const next = !fbMuted; setFbMuted(next); if (next) fbRef.current?.mute(); else fbRef.current?.unmute() }}
+              className="absolute z-20 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold transition-transform active:scale-95"
+              style={{
+                ...(fullScreen ? { top: 100, right: 12 } : { top: 12, right: 12 }),
+                background: fbMuted ? '#ef4444' : '#111827',
+                color: '#fff',
+                boxShadow: '0 3px 16px rgba(0,0,0,0.7)',
+              }}
+              title={fbMuted ? t('live.tapForSound') : t('live.mute')}
+            >
+              {fbMuted ? <VolumeOff size={14} /> : <Volume2 size={14} />}
+              {fbMuted ? t('live.tapForSound') : t('live.mute')}
+            </button>
+          </>
+        )
       ) : ytId ? (
         // YouTube via the IFrame API: hidden controls + non-pausable (see
         // YouTubeLivePlayer). Autoplays muted when iOS allows; one tap starts
         // it when the OS blocks autoplay (Low Power Mode).
-        <YouTubeLivePlayer key={iframeKey} videoId={ytId} muted={isMuted} className="h-full w-full" />
+        <YouTubeLivePlayer ref={ytRef} key={iframeKey} videoId={ytId} muted={isMuted} className="h-full w-full" />
       ) : nonFbEmbedSrc ? (
         <iframe
           key={iframeKey}
@@ -557,12 +736,21 @@ const LiveStreamBox = memo(function LiveStreamBox({
       )}
 
       {/* Sound toggle — start muted (required for autoplay), tap to unmute.
-          Always shown so the customer can control sound on every source. On
-          the mobile full-screen view it stacks UNDER the Reload button. */}
-      {rawUrl && (
+          Shown for sources our button can actually control (YouTube/Cloudflare/
+          HLS). Hidden for Facebook: FB is a cross-origin iframe we can't drive,
+          so we let Facebook's OWN native controls (play/pause, mute, expand, FB
+          logo — bottom-right of the video) be the interface instead. On the
+          mobile full-screen view it stacks UNDER the Reload button. */}
+      {rawUrl && !isFb && (
         <button
           type="button"
-          onClick={() => setIsMuted(m => !m)}
+          onClick={() => {
+            const next = !isMuted
+            setIsMuted(next)
+            // Drive YouTube synchronously in the tap so iOS honors start/unmute
+            // even if autoplay was blocked (Low Power Mode). No-op for others.
+            ytRef.current?.setSound(next)
+          }}
           className="absolute z-20 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold transition-transform active:scale-95"
           style={{
             ...(fullScreen ? { top: 100, right: 12 } : { bottom: 'max(env(safe-area-inset-bottom), 14px)', left: 12 }),
