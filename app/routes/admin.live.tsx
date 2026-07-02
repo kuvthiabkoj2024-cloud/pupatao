@@ -409,6 +409,22 @@ export async function action({ request }: Route.ActionArgs) {
       return { ok: true }
     }
 
+    // Broadcast a PWA push notification to every opted-in device ("we're live").
+    if (op === 'notifyLive') {
+      const { sendPushToAll } = await import('~/lib/push.server')
+      const message = String(fd.get('message') ?? '').trim()
+      const result = await sendPushToAll({
+        title: '🔴 ພວກເຮົາກຳລັງໄລສົດ!',
+        body: message || 'ກົດເພື່ອເຂົ້າຮ່ວມດຽວນີ້',
+        url: '/',
+        tag: 'pupatao-live',
+      })
+      await prisma.auditLog.create({
+        data: { actorId: admin.id, action: 'push.notifyLive', target: 'push:all', metadata: result },
+      }).catch(() => { /* audit best-effort */ })
+      return { ok: true, push: result }
+    }
+
     const roundId = String(fd.get('roundId') ?? '')
     if (!roundId) return { error: translate(locale, 'admin.live.action.roundIdRequired') }
 
@@ -2249,6 +2265,8 @@ function ScheduleModal({
 
 function StartRoundPanel({ defaultStreamUrl, defaultSeconds, loading }: { defaultStreamUrl: string; defaultSeconds: number; loading: boolean }) {
   const t = useT()
+  const notifyFetcher = useFetcher<{ ok?: boolean; push?: { sent: number; failed: number; pruned: number } }>()
+  const notifying = notifyFetcher.state !== 'idle'
   return (
     <div className="rounded-xl p-4" style={{ background: '#0f172a', border: '1px solid #1e1b4b' }}>
       <div className="mb-3 flex items-center gap-2 text-[10px] font-bold " style={{ color: '#a5b4fc' }}>
@@ -2287,6 +2305,33 @@ function StartRoundPanel({ defaultStreamUrl, defaultSeconds, loading }: { defaul
           {t('admin.live.startRound')}
         </button>
       </Form>
+
+      {/* Broadcast a PWA push notification to every opted-in device. */}
+      <div className="mt-3 border-t pt-3" style={{ borderColor: '#1e1b4b' }}>
+        <notifyFetcher.Form method="post" className="flex flex-col gap-2">
+          <input type="hidden" name="op" value="notifyLive" />
+          <input
+            name="message"
+            placeholder={t('admin.live.notifyPlaceholder')}
+            className="rounded-lg px-3 py-2 text-xs outline-none"
+            style={{ background: '#1e1b4b', color: '#fde68a', border: '1px solid #4338ca' }}
+          />
+          <button
+            type="submit"
+            disabled={notifying}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg py-2.5 text-xs font-bold disabled:opacity-50"
+            style={{ background: 'linear-gradient(135deg,#7c3aed,#4c1d95)', color: '#fff', border: '1px solid #a78bfa' }}
+          >
+            {notifying ? <Loader size={14} className="animate-spin" /> : <Radio size={14} />}
+            {t('admin.live.notifyLive')}
+          </button>
+          {notifyFetcher.data?.push && (
+            <p className="text-center text-[10px]" style={{ color: '#a5b4fc' }}>
+              {t('admin.live.notifySent', { sent: String(notifyFetcher.data.push.sent), failed: String(notifyFetcher.data.push.failed) })}
+            </p>
+          )}
+        </notifyFetcher.Form>
+      </div>
     </div>
   )
 }

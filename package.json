@@ -7,6 +7,7 @@
     "dev": "react-router dev",
     "build": "prisma generate && react-router build",
     "start": "react-router-serve ./build/server/index.js",
+    "start:local": "node --env-file=.env ./node_modules/.bin/react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
@@ -75,6 +76,7 @@
     "sonner": "^1.7.1",
     "tailwind-merge": "^3.3.1",
     "vaul": "^1.1.2",
+    "web-push": "^3.6.7",
     "zod": "^3.24.1",
     "zustand": "^5.0.12"
   },
@@ -88,6 +90,7 @@
     "@types/nodemailer": "^8.0.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "@types/web-push": "^3.6.4",
     "dotenv": "^17.4.2",
     "playwright": "^1.61.0",
     "prisma": "^6",

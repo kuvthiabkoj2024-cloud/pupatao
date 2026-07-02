@@ -22,6 +22,7 @@ import { ADMIN_PLAY_HISTORY_STRINGS } from "./i18n-admin/play-history";
 import { ADMIN_COMPETITION_STRINGS } from "./i18n-admin/competition";
 import { ADMIN_FINANCIAL_STRINGS } from "./i18n-admin/financial";
 import { ADMIN_LIVE_STRINGS } from "./i18n-admin/live";
+import { ADMIN_NOTIFICATIONS_STRINGS } from "./i18n-admin/notifications";
 
 export type Locale = "lo" | "en";
 export const DEFAULT_LOCALE: Locale = "lo";
@@ -55,6 +56,7 @@ export const STRINGS = {
   ...ADMIN_COMPETITION_STRINGS,
   ...ADMIN_FINANCIAL_STRINGS,
   ...ADMIN_LIVE_STRINGS,
+  ...ADMIN_NOTIFICATIONS_STRINGS,
 
   // ─── Common ──────────────────────────────────────────────────────────
   "common.cancel": { lo: "ຍົກເລີກ", en: "Cancel" },
@@ -530,6 +532,16 @@ export const STRINGS = {
   "live.betLocked": { lo: "⏳ ກຳລັງເລີ່ມຮອບໃໝ່, ກະລຸນາລໍຖ້າ...", en: "⏳ Starting a new round, please wait…" },
   "live.reload": { lo: "ໂຫຼດໃໝ່", en: "Reload" },
   "live.watchOnFacebook": { lo: "ກົດເບິ່ງຖ່າຍທອດສົດໃນ Facebook", en: "Watch live on Facebook" },
+
+  // Push notifications (PWA)
+  "push.title": { lo: "ການແຈ້ງເຕືອນ", en: "Notifications" },
+  "push.desc": { lo: "ຮັບການແຈ້ງເຕືອນເມື່ອພວກເຮົາໄລສົດ", en: "Get notified when we go live" },
+  "push.enable": { lo: "ເປີດການແຈ້ງເຕືອນ", en: "Enable notifications" },
+  "push.enabled": { lo: "ເປີດການແຈ້ງເຕືອນແລ້ວ", en: "Notifications on" },
+  "push.disable": { lo: "ປິດ", en: "Turn off" },
+  "push.blocked": { lo: "ການແຈ້ງເຕືອນຖືກບລັອກ — ເປີດໃນການຕັ້ງຄ່າ browser", en: "Notifications are blocked — enable them in your browser settings" },
+  "push.installFirst": { lo: "ຕິດຕັ້ງແອັບໃສ່ໜ້າຈໍຫຼັກກ່ອນ ຈຶ່ງຮັບການແຈ້ງເຕືອນໄດ້", en: "Add the app to your Home Screen first to receive notifications" },
+  "push.unsupported": { lo: "ອຸປະກອນນີ້ບໍ່ຮອງຮັບການແຈ້ງເຕືອນ", en: "This device doesn't support notifications" },
   "live.tapForSound": { lo: "ເປີດສຽງ", en: "Sound" },
   "live.mute": { lo: "ປິດສຽງ", en: "Mute" },
   "live.statusWaitingResult": {

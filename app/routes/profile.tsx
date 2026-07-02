@@ -16,6 +16,7 @@ import { buildReferralShareUrl, generateUniqueReferralCode } from '~/lib/referra
 import { playClick } from '~/hooks/use-sound-engine'
 import { useT } from '~/lib/use-t'
 import { ReferralModal, ReferralsList } from '~/components/ReferralModal'
+import { PushOptIn } from '~/components/PushOptIn'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LOADER — return the full authenticated user profile (sans password hash).
@@ -295,6 +296,10 @@ export default function ProfilePage() {
       </header>
 
       <div className="mx-auto flex max-w-xl flex-col gap-5 px-4 py-6">
+        {/* PWA push-notification opt-in ("we're live" alerts). Self-hides on
+            unsupported devices. */}
+        <PushOptIn />
+
         {/* Save error banner (success goes to a toast instead — see effect above). */}
         {actionData && 'error' in actionData && actionData.error && (
           <div

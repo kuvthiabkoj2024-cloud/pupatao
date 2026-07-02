@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import type { Route } from './+types/home'
 import { LoginModal } from '~/components/LoginModal'
 import { JoinGroupModal } from '~/components/JoinGroupModal'
+import { PushAutoEnable } from '~/components/PushAutoEnable'
 import { RegisterModal } from '~/components/RegisterModal'
 import { FeatureTour, type TourStep } from '~/components/FeatureTour'
 import { useUser } from '~/hooks/use-user'
@@ -2650,6 +2651,8 @@ export default function FishPrawnCrabGame() {
       }}
       onClick={ensureBgMusic}
     >
+      {/* Auto-subscribe to push (no manual button; prompts on first tap). */}
+      <PushAutoEnable />
 
       {/* ── LIVE FULL-SCREEN OVERLAY (mobile only) ──────────────────────── */}
       {mode === 'live' && (

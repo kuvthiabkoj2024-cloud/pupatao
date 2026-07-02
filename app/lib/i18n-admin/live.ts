@@ -108,6 +108,9 @@ export const ADMIN_LIVE_STRINGS = {
   // ─── Start round panel ──────────────────────────────────────────────
   "admin.live.startNewLiveRound": { lo: "ເລີ່ມຮອບ LIVE ໃໝ່", en: "START NEW LIVE ROUND" },
   "admin.live.startRound": { lo: "ເລີ່ມຮອບ", en: "START ROUND" },
+  "admin.live.notifyLive": { lo: "ແຈ້ງເຕືອນຜູ້ຫຼິ້ນ: ພວກເຮົາໄລສົດ", en: "Notify players: we're live" },
+  "admin.live.notifyPlaceholder": { lo: "ຂໍ້ຄວາມເພີ່ມເຕີມ (ວ່າງໄວ້ກໍໄດ້)", en: "Optional message" },
+  "admin.live.notifySent": { lo: "ສົ່ງແລ້ວ {sent} · ລົ້ມເຫລວ {failed}", en: "Sent {sent} · failed {failed}" },
   "admin.live.noStreamUrl": { lo: "ຍັງບໍ່ໄດ້ກຳນົດລິ້ງສະຕຣີມ.", en: "No stream URL set yet." },
   "admin.live.liveStreamTitle": { lo: "ສະຕຣີມ LIVE", en: "LIVE stream" },
 

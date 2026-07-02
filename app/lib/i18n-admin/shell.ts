@@ -15,6 +15,8 @@ export const ADMIN_SHELL_STRINGS = {
   "admin.shell.playHistoryMobile": { lo: "ປະຫວັດ", en: "Plays" },
   "admin.shell.competition": { lo: "ການແຂ່ງຂັນ", en: "Competition" },
   "admin.shell.competitionMobile": { lo: "ແຂ່ງຂັນ", en: "Contest" },
+  "admin.shell.notifications": { lo: "ແຈ້ງເຕືອນ", en: "Notifications" },
+  "admin.shell.notificationsMobile": { lo: "ແຈ້ງເຕືອນ", en: "Notify" },
   "admin.shell.financial": { lo: "ການເງິນ", en: "Financial" },
   "admin.shell.financialMobile": { lo: "ການເງິນ", en: "Finance" },
 

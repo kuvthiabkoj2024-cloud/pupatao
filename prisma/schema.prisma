@@ -136,6 +136,62 @@ model CompetitionParticipant {
   @@index([joinedAt(sort: Desc)])
 }
 
+// Web Push subscriptions (PWA notifications). One row per browser/device that
+// opted in. `endpoint` is the push service URL and is globally unique. `userId`
+// is optional so an anonymous visitor who installed the PWA can still be
+// notified. Dead subscriptions (404/410 from the push service) are pruned on send.
+model PushSubscription {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  endpoint  String   @unique
+  p256dh    String // subscription.keys.p256dh (client public key)
+  auth      String // subscription.keys.auth (client auth secret)
+  userId    String?  @db.ObjectId
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Audience filters for a push campaign. Resolved against completed DEPOSIT /
+// WITHDRAW transactions (see app/lib/notifications.server.ts). "LT/GT_100K"
+// match users who have *at least one* deposit/withdraw crossing the threshold.
+enum NotificationAudience {
+  ALL // every opted-in device
+  NEVER_DEPOSIT // no completed deposit ever
+  NEVER_WITHDRAW // no completed withdrawal ever
+  DEPOSIT_LAST_7D // a completed deposit in the last 7 days
+  DEPOSIT_LT_100K // has a deposit < 100,000 ₭
+  DEPOSIT_GT_100K // has a deposit > 100,000 ₭
+  WITHDRAW_LT_100K // has a withdrawal < 100,000 ₭
+  WITHDRAW_GT_100K // has a withdrawal > 100,000 ₭
+}
+
+enum NotificationMode {
+  ONCE // fire once (immediately, or at `scheduledAt`)
+  DAILY // fire every day at `timeOfDay` (GMT+7) while `active`
+}
+
+// A push-notification campaign the admin composes on /admin/notifications.
+// `message` may contain {{phone_number}} / {{first_name}} / {{last_name}} /
+// {{name}} placeholders, rendered per-recipient at send time.
+model NotificationCampaign {
+  id          String               @id @default(auto()) @map("_id") @db.ObjectId
+  title       String? // optional notification title (defaults to app name)
+  message     String // body template with {{placeholders}}
+  audience    NotificationAudience @default(ALL)
+  mode        NotificationMode     @default(ONCE)
+  timeOfDay   String? // "HH:mm" in GMT+7 — DAILY only
+  scheduledAt DateTime? // UTC — a future ONCE send (null = send immediately)
+  active      Boolean              @default(true) // DAILY on/off; set false after a ONCE fires
+  lastRunAt   DateTime? // last time it was dispatched
+  lastSent    Int? // recipients reached on the last run
+  createdById String               @db.ObjectId
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([mode, active])
+}
+
 // Staff account. Separate from User for auth segregation (email+2FA) and
 // because hosting rounds / resolving payouts is an operator activity.
 model Admin {

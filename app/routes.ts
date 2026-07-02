@@ -23,6 +23,8 @@ export default [
   route("api/cancel-live-bet", "routes/api.cancel-live-bet.tsx"),
   route("api/reset-demo", "routes/api.reset-demo.tsx"),
   route("api/mark-tour-seen", "routes/api.mark-tour-seen.tsx"),
+  route("api/push-subscribe", "routes/api.push-subscribe.tsx"),
+  route("api/cron/notifications", "routes/api.cron.notifications.tsx"),
   route("api/admin/live-history", "routes/api.admin.live-history.tsx"),
   route("api/admin/wallet-summary", "routes/api.admin.wallet-summary.tsx"),
   route("api/admin/viewer-balances", "routes/api.admin.viewer-balances.tsx"),
@@ -41,6 +43,7 @@ export default [
     route("live", "routes/admin.live.tsx"),
     route("competition", "routes/admin.competition.tsx"),
     route("competition/:id", "routes/admin.competition.$id.tsx"),
+    route("notifications", "routes/admin.notifications.tsx"),
     route("financial", "routes/admin.financial.tsx"),
   ]),
 ] satisfies RouteConfig

@@ -5,6 +5,10 @@ import tsconfigPaths from "vite-tsconfig-paths"
 import { VitePWA } from "vite-plugin-pwa"
 
 export default defineConfig({
+  // Allow tunneling the dev server through ngrok (host check off for these).
+  // NOTE: push notifications still require the production build (`npm run
+  // start:local`) — the service worker is disabled in dev.
+  server: { allowedHosts: ['.ngrok-free.app', '.ngrok-free.dev', '.ngrok.io'] },
   plugins: [
     tailwindcss(),
     reactRouter(),
@@ -38,11 +42,15 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,svg,png,jpg,ico,webmanifest}"],
         // No navigateFallback — let every navigation hit the network so the
         // SSR payload (user, wallet) is always fresh.
+        //
+        // Pull our push-notification handlers (push / notificationclick) into
+        // the generated service worker. The file lives in /public.
+        importScripts: ["/push-sw.js"],
       },
       // SW disabled in dev. Re-enable later only after we have a strategy
       // that doesn't cache authed HTML.
       devOptions: { enabled: false },
     }),
   ],
-  ssr: { external: ['@prisma/client', '.prisma/client', 'bcryptjs', 'pusher'] },
+  ssr: { external: ['@prisma/client', '.prisma/client', 'bcryptjs', 'pusher', 'web-push'] },
 })

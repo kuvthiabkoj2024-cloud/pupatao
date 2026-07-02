@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Form, NavLink, Outlet, useLoaderData, useNavigation, useRevalidator } from 'react-router'
-import { BarChart2, Banknote, Dices, LayoutDashboard, Loader, LogOut, Radio, ShieldCheck, Trophy, Users, Wallet } from 'lucide-react'
+import { BarChart2, Banknote, Bell, Dices, LayoutDashboard, Loader, LogOut, Radio, ShieldCheck, Trophy, Users, Wallet } from 'lucide-react'
 import { Skeleton } from '~/components/ui/skeleton'
 import { toast } from 'sonner'
 import type { Route } from './+types/admin'
@@ -74,6 +74,7 @@ const NAV: NavItem[] = [
   { to: '/admin/transactions', labelKey: 'admin.shell.transactions', mobileLabelKey: 'admin.shell.transactionsMobile', Icon: Banknote, badgeKey: 'pendingTx', roles: ['ADMIN', 'SUPERADMIN'] },
   { to: '/admin/play-history', labelKey: 'admin.shell.playHistory', mobileLabelKey: 'admin.shell.playHistoryMobile', Icon: Dices, badgeKey: 'pendingBets', roles: ['ADMIN', 'SUPERADMIN'] },
   { to: '/admin/competition', labelKey: 'admin.shell.competition', mobileLabelKey: 'admin.shell.competitionMobile', Icon: Trophy, roles: ['ADMIN', 'SUPERADMIN'] },
+  { to: '/admin/notifications', labelKey: 'admin.shell.notifications', mobileLabelKey: 'admin.shell.notificationsMobile', Icon: Bell, roles: ['ADMIN', 'SUPERADMIN'] },
   { to: '/admin/financial', labelKey: 'admin.shell.financial', mobileLabelKey: 'admin.shell.financialMobile', Icon: BarChart2, roles: ['SUPERADMIN'] },
 ]
 
