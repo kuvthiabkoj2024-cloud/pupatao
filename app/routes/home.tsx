@@ -1506,35 +1506,16 @@ export default function FishPrawnCrabGame() {
   // presence-live channel (which would inflate the viewer count). Drives
   // both the pulsing badge on the mode switcher and the dismissible banner.
   const [liveRoundActive, setLiveRoundActive] = useState(!!liveRound)
-  const [activeLiveRoundId, setActiveLiveRoundId] = useState<string | null>(liveRound?.id ?? null)
   useEffect(() => {
     setLiveRoundActive(!!loaderData.liveRound)
-    setActiveLiveRoundId(loaderData.liveRound?.id ?? null)
   }, [loaderData.liveRound?.id])
 
-  usePusherEvent<RoundStartedPayload>(GAME_CHANNEL, 'round:started', payload => {
+  usePusherEvent<RoundStartedPayload>(GAME_CHANNEL, 'round:started', () => {
     setLiveRoundActive(true)
-    setActiveLiveRoundId(payload.roundId)
   })
   usePusherEvent<LiveEndedPayload>(GAME_CHANNEL, 'live:ended', () => {
     setLiveRoundActive(false)
   })
-
-  // One-time-per-round dismissible nudge banner — re-appears for a new round
-  // even if the previous one was dismissed, since that's a fresh chance to join.
-  const [liveBannerDismissed, setLiveBannerDismissed] = useState(false)
-  useEffect(() => {
-    if (!activeLiveRoundId) { setLiveBannerDismissed(false); return }
-    try {
-      setLiveBannerDismissed(sessionStorage.getItem('fpc_live_banner_dismissed') === activeLiveRoundId)
-    } catch { /* sessionStorage may be unavailable */ }
-  }, [activeLiveRoundId])
-  function dismissLiveBanner() {
-    setLiveBannerDismissed(true)
-    try {
-      if (activeLiveRoundId) sessionStorage.setItem('fpc_live_banner_dismissed', activeLiveRoundId)
-    } catch { /* sessionStorage may be unavailable */ }
-  }
 
   // Local competition state — updated immediately via Pusher (before loader revalidation)
   const [competitionEnabled, setCompetitionEnabledLocal] = useState(loaderData.competitionEnabled)
@@ -1543,21 +1524,26 @@ export default function FishPrawnCrabGame() {
   useEffect(() => { setCompetitionMenuVisibleLocal(loaderData.competitionMenuVisible) }, [loaderData.competitionMenuVisible])
   const revalidator = useRevalidator()
 
-  // Restore the user's last-selected play mode from localStorage on mount.
-  // The mode persists across refreshes and app restarts; only an explicit
-  // selectMode() call overwrites it.
+  // ── Auto-switch to LIVE while a live session is on ──────────────────────
+  // "Live on" = a betting round is open (instant, via the public game channel)
+  // OR the stream is still active between rounds (persists until the admin ends
+  // live / the schedule clears). While it's on we FORCE live mode and hide the
+  // self-play option; when it ends we fall back to self-play.
+  const liveOn = liveRoundActive || !!activeStreamUrl
+
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('fpc_play_mode')
-      if (saved === 'live') {
-        setMode('live')
-        revalidator.revalidate() // pick up any in-flight live round
-      }
-    } catch { /* localStorage may be unavailable */ }
-    // Intentionally mount-only — re-running this on revalidator changes would
-    // re-trigger revalidation in a loop.
+    setMode(liveOn ? 'live' : 'random')
+  }, [liveOn])
+
+  // Self-play viewers aren't subscribed to the presence-live channel, so when a
+  // round opens/ends on the public game channel we refresh the loader here to
+  // pull the current stream URL + round data (and to clear it when live ends).
+  const didMountLiveRef = useRef(false)
+  useEffect(() => {
+    if (!didMountLiveRef.current) { didMountLiveRef.current = true; return }
+    revalidator.revalidate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [liveRoundActive])
 
   // Locally-mirrored dice for the open round. Initialised from the loader and
   // updated optimistically as the admin reveals each die (round:dice event).
@@ -2702,14 +2688,14 @@ export default function FishPrawnCrabGame() {
             {/* Center: mode selector — uses its own state to avoid conflicting with the main header */}
             <div className="relative z-10">
               <button
-                onClick={() => { playClick(); setOverlayModeOpen(v => !v) }}
+                onClick={() => { if (liveOn) return; playClick(); setOverlayModeOpen(v => !v) }}
                 className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold"
                 style={{ background: 'rgba(220,38,38,0.85)', color: '#fff', border: '1px solid #fca5a5' }}
               >
                 {t('game.modeLive')}
-                <ChevronDown size={10} style={{ transform: overlayModeOpen ? 'rotate(180deg)' : 'none' }} />
+                {!liveOn && <ChevronDown size={10} style={{ transform: overlayModeOpen ? 'rotate(180deg)' : 'none' }} />}
               </button>
-              {overlayModeOpen && (
+              {overlayModeOpen && !liveOn && (
                 <PickerDropdown
                   items={[{ key: 'random', label: t('game.modeSelf') }, { key: 'live', label: t('game.modeLive') }]}
                   active={mode}
@@ -3301,7 +3287,9 @@ export default function FishPrawnCrabGame() {
             <div className="relative">
               <button
                 data-tour="mode-switcher"
-                onClick={() => { playClick(); setModeOpen(v => !v) }}
+                // While live is on the mode is forced to LIVE (self-play hidden) —
+                // the switcher is locked and won't open a picker.
+                onClick={() => { if (liveOn) return; playClick(); setModeOpen(v => !v) }}
                 className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold"
                 style={{
                   background: mode === 'live'
@@ -3314,17 +3302,12 @@ export default function FishPrawnCrabGame() {
                 aria-haspopup="menu"
                 aria-expanded={modeOpen}
               >
-                {mode === 'random' && liveRoundActive && (
-                  <span
-                    aria-hidden
-                    className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-pulse rounded-full"
-                    style={{ background: '#ef4444', boxShadow: '0 0 6px rgba(239,68,68,0.9)' }}
-                  />
-                )}
                 <span>{mode === 'live' ? t('game.modeLive') : t('game.modeSelf')}</span>
-                <ChevronDown size={12} style={{ transform: modeOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 120ms' }} />
+                {!liveOn && (
+                  <ChevronDown size={12} style={{ transform: modeOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 120ms' }} />
+                )}
               </button>
-              {modeOpen && (
+              {modeOpen && !liveOn && (
                 <PickerDropdown
                   items={[
                     { key: 'random', label: t('game.modeSelf') },
@@ -3497,39 +3480,9 @@ export default function FishPrawnCrabGame() {
         </div>
       </header>
 
-      {/* Nudge banner — tells self-play players a LIVE round is open right
-          now. Floats above the board (doesn't affect the fixed-height main
-          layout below) and is dismissible per-round via sessionStorage. */}
-      {mode === 'random' && liveRoundActive && !liveBannerDismissed && (
-        <div className="fixed inset-x-0 top-[58px] z-30 flex justify-center px-3">
-          <div
-            className="flex w-full max-w-md items-center gap-2 rounded-xl px-3 py-2 shadow-lg animate-in fade-in slide-in-from-top-2 duration-300"
-            style={{ background: 'linear-gradient(135deg, #dc2626, #7f1d1d)', border: '1px solid #fca5a5' }}
-          >
-            <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full" style={{ background: '#fff' }} />
-            <span className="flex-1 text-xs font-bold" style={{ color: '#fff' }}>
-              {t('game.liveRoundBanner')}
-            </span>
-            <button
-              type="button"
-              onClick={() => { playClick(); selectMode('live') }}
-              className="shrink-0 rounded-full px-3 py-1 text-[10px] font-bold transition-opacity hover:opacity-90"
-              style={{ background: '#fff', color: '#7f1d1d' }}
-            >
-              {t('game.watchLive')}
-            </button>
-            <button
-              type="button"
-              onClick={dismissLiveBanner}
-              aria-label={t('common.close')}
-              className="shrink-0 rounded-full p-1 transition-opacity hover:opacity-80"
-              style={{ color: '#fff' }}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-      )}
+      {/* (The old "a LIVE round is open" nudge banner was removed — customers
+          are now auto-switched into live mode while a live session is on, and
+          returned to self-play when it ends.) */}
 
       <main className="flex h-[calc(100vh-52px)] overflow-hidden">
         <aside
