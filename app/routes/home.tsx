@@ -397,7 +397,7 @@ const LiveStreamBox = memo(function LiveStreamBox({
   // the raw facebook.com/<page>/videos/<id> URL.
   const fbEmbedSrc: string | null = (!rawUrl || !isFb)
     ? null
-    : `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(rawUrl)}&show_text=false&width=${Math.round(fbWidth ?? 500)}&autoplay=true&mute=1&allowfullscreen=true`
+    : `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(rawUrl)}&show_text=false&width=${Math.round(fbWidth ?? 500)}&autoplay=true&mute=${isMuted ? 1 : 0}&allowfullscreen=true`
 
   // YouTube goes through the IFrame API player (controls hidden, non-pausable).
   const ytId = rawUrl && !isVideo && !isFb && !isCf ? youtubeVideoId(rawUrl) : null
@@ -479,7 +479,7 @@ const LiveStreamBox = memo(function LiveStreamBox({
         // plays perfectly. Betting keeps working in-app via Pusher regardless.
         <>
           <iframe
-            key={iframeKey}
+            key={`${iframeKey}-${isMuted ? 'm' : 'u'}`}
             src={fbEmbedSrc}
             className="h-full w-full"
             style={{ border: 'none', display: 'block', pointerEvents: isIos ? 'none' : 'auto' }}
@@ -557,10 +557,9 @@ const LiveStreamBox = memo(function LiveStreamBox({
       )}
 
       {/* Sound toggle — start muted (required for autoplay), tap to unmute.
-          On the mobile full-screen view it stacks UNDER the Reload button.
-          Hidden for Facebook, which exposes its own native mute/volume control
-          inside the iframe (our button can't reach the cross-origin player). */}
-      {rawUrl && !isFb && (
+          Always shown so the customer can control sound on every source. On
+          the mobile full-screen view it stacks UNDER the Reload button. */}
+      {rawUrl && (
         <button
           type="button"
           onClick={() => setIsMuted(m => !m)}
