@@ -2743,11 +2743,6 @@ export default function FishPrawnCrabGame() {
       {/* ── LIVE FULL-SCREEN OVERLAY (mobile only) ──────────────────────── */}
       {mode === 'live' && (
         <div className="fixed inset-0 z-[100] bg-black md:hidden">
-          {/* TEMP DEBUG — remove after fixing the iOS betting-board issue. */}
-          <div className="pointer-events-none absolute left-1 z-[120] font-mono text-[9px] leading-tight"
-            style={{ top: 'max(env(safe-area-inset-top), 2px)', color: '#0f0', textShadow: '0 0 2px #000' }}>
-            ph:{livePhase} t:{liveTimer} lr:{liveRound?.status ?? 'null'}/{liveRound?.id?.slice(-4) ?? '-'} dice:{(liveRound?.dice ?? []).map(d => d ? String(d).slice(0, 2) : '_').join(',')} mir:{liveMirror?.id?.slice(-4) ?? '-'} ldr:{loaderData.liveRound?.id?.slice(-4) ?? '-'}
-          </div>
           {/* Full-screen video — transform forces a new compositing layer on
               iOS Safari, preventing the blank/black iframe rendering bug that
               occurs when an iframe sits inside a position:fixed parent. */}
