@@ -1619,11 +1619,14 @@ export default function FishPrawnCrabGame() {
           })
         }
 
-        // One revalidation per phase transition (new round / lock / resolve) to
-        // sync wallet balance, settlement modal and history — not every poll.
-        const key = round ? `${round.id}:${round.status}` : 'none'
-        if (key !== lastPolledKeyRef.current) {
-          lastPolledKeyRef.current = key
+        // Revalidate only when the ROUND changes (new round starts, or it
+        // clears on resolve/end) — to refresh wallet balance, my-bets and
+        // history. NOT on mid-round status/dice changes: the mirror above
+        // already drives the board + reveal, so extra loader re-runs here would
+        // just churn the main thread and stutter the iOS video for no gain.
+        const rid = round?.id ?? 'none'
+        if (rid !== lastPolledKeyRef.current) {
+          lastPolledKeyRef.current = rid
           revalidator.revalidate()
         }
       } catch { /* ignore */ }
