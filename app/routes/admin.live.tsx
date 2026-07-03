@@ -648,6 +648,9 @@ export async function action({ request }: Route.ActionArgs) {
         })
         const balances: Record<string, number> = {}
         for (const grp of playerGroups.values()) {
+          // Key balances per (user, wallet) — a user can bet from more than one
+          // wallet in the same round, and each wallet settles independently.
+          const grpKey = `${grp.userId}:${grp.walletId}`
           const w = await db.wallet.findUnique({ where: { id: grp.walletId } })
           if (!w) continue
           let bal = w.balance
@@ -671,7 +674,7 @@ export async function action({ request }: Route.ActionArgs) {
             bal = afterRefund
           }
 
-          balances[grp.userId] = bal  // default to balance after any refund (no win)
+          balances[grpKey] = bal  // default to balance after any refund (no win)
           if (grp.payout <= 0) continue
 
           if (grp.walletType === 'PROMO') {
@@ -714,7 +717,7 @@ export async function action({ request }: Route.ActionArgs) {
             }
             // For settlement summary purposes, "newBalance" reports the source
             // (PROMO) wallet's resulting balance, not REAL — matches DEMO/REAL.
-            balances[grp.userId] = newPromoBalance
+            balances[grpKey] = newPromoBalance
           } else {
             const newBalance = bal + grp.payout
             await db.wallet.update({
@@ -729,7 +732,7 @@ export async function action({ request }: Route.ActionArgs) {
                 note: `Live round payout (#${roundId.slice(-6)})`,
               },
             })
-            balances[grp.userId] = newBalance
+            balances[grpKey] = newBalance
           }
         }
         return balances
@@ -765,7 +768,11 @@ export async function action({ request }: Route.ActionArgs) {
       const perUserBets = new Map<string, { kind: 'SYMBOL' | 'RANGE' | 'PAIR' | 'SUM'; amount: number; symbol: string | null; range: string | null; pairA: string | null; pairB: string | null; exactSum: number | null; payout: number; result: 'WIN' | 'LOSS' | 'REFUNDED' }[]>()
       bets.forEach((b, i) => {
         const u = betUpdates[i]
-        const list = perUserBets.get(b.userId) ?? []
+        // Key per (user, wallet) so each wallet's settlement modal shows ONLY
+        // the bets placed from that wallet (a user can bet from 2 wallets in the
+        // same round — mixing them made the net and the breakdown disagree).
+        const key = `${b.userId}:${b.walletId}`
+        const list = perUserBets.get(key) ?? []
         list.push({
           kind: b.kind as 'SYMBOL' | 'RANGE' | 'PAIR' | 'SUM',
           amount: b.amount,
@@ -777,14 +784,15 @@ export async function action({ request }: Route.ActionArgs) {
           payout: u.payout,
           result: u.result,
         })
-        perUserBets.set(b.userId, list)
+        perUserBets.set(key, list)
       })
 
       const resolvedPayload = { roundId, mode: 'LIVE' as const, dice: dice as string[], diceSum }
       notifyAdmin('round:resolved', resolvedPayload)
       notifyPresenceLive('round:resolved', resolvedPayload)
       for (const grp of playerGroups.values()) {
-        const newBalance = newBalances[grp.userId] ?? 0
+        const grpKey = `${grp.userId}:${grp.walletId}`
+        const newBalance = newBalances[grpKey] ?? 0
         notifyUser(grp.userId, 'round:settled', {
           roundId,
           dice: dice as string[],
@@ -793,7 +801,7 @@ export async function action({ request }: Route.ActionArgs) {
           payout: grp.payout,
           net: grp.payout - grp.stake,
           newBalance,
-          bets: perUserBets.get(grp.userId) ?? [],
+          bets: perUserBets.get(grpKey) ?? [],
         })
         notifyUser(grp.userId, 'transaction:updated', {
           id: `round:${roundId}`,
@@ -886,7 +894,7 @@ export async function action({ request }: Route.ActionArgs) {
           stake: grp.stake,
           payout: grp.payout,
           net: grp.payout - grp.stake,
-          newBalance: newBalances[grp.userId] ?? 0,
+          newBalance: newBalances[`${grp.userId}:${grp.walletId}`] ?? 0,
         }))
       const totalStake = players.reduce((s, p) => s + p.stake, 0)
       const totalPayout = players.reduce((s, p) => s + p.payout, 0)

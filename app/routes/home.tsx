@@ -889,6 +889,14 @@ function LiveScheduleCard({
 
 type LivePhase = 'idle' | 'betting' | 'awaiting_result'
 
+// Client-side mirror of the active LIVE round (fed by Pusher + the poll).
+type LiveMirror = {
+  id: string
+  status: 'BETTING' | 'LOCKED' | 'AWAITING_RESULT'
+  bettingClosesAt: string | null
+  dice: (string | null)[]
+}
+
 // Colors for pair connector lines, hashed from cell indices so same pair always gets the same color.
 const PAIR_COLORS = ['#3b82f6', '#22d3ee', '#f472b6', '#fbbf24', '#a3e635', '#f87171', '#c084fc', '#fb923c']
 function pairColor(cellA: number, cellB: number): string {
@@ -1503,20 +1511,23 @@ export default function FishPrawnCrabGame() {
   // bettingClosesAt, so we synthesize a BETTING round from it until the loader
   // catches up. The `> nowTick` guard means it can ONLY add the (missing)
   // betting phase — it never resurrects a stale awaiting/idle round.
-  const [optimisticBet, setOptimisticBet] = useState<{ roundId: string; closesAt: string } | null>(null)
+  // Full mirror of the current active LIVE round, kept fresh by BOTH the Pusher
+  // events AND the /api/live-round poll. On iOS, Safari throttles the Pusher
+  // socket while the video decodes, so the poll is the reliable source — and
+  // this mirror (not the throttled loader) is preferred whenever it's set. It
+  // carries status + dice so the betting board AND the dice reveal both work.
+  const [liveMirror, setLiveMirror] = useState<LiveMirror | null>(null)
 
   const loaderRound = loaderData.liveRound
-  const liveRound = loaderRound ?? (
-    optimisticBet && new Date(optimisticBet.closesAt).getTime() > nowTick
-      ? {
-          id: optimisticBet.roundId,
-          status: 'BETTING' as 'BETTING' | 'LOCKED' | 'AWAITING_RESULT',
-          streamUrl: loaderData.liveStreamUrl ?? null,
-          bettingClosesAt: optimisticBet.closesAt as string | null,
-          dice: [null, null, null] as (string | null)[],
-        }
-      : null
-  )
+  const liveRound = liveMirror
+    ? {
+        id: liveMirror.id,
+        status: liveMirror.status,
+        streamUrl: loaderData.liveStreamUrl ?? loaderRound?.streamUrl ?? null,
+        bettingClosesAt: liveMirror.bettingClosesAt,
+        dice: liveMirror.dice,
+      }
+    : loaderRound
   // Bet-locked users can watch a LIVE round but never see the betting board.
   const betLocked = loaderData.betLocked
   // The URL shown to customers: active round's stream takes priority; otherwise
@@ -1537,11 +1548,11 @@ export default function FishPrawnCrabGame() {
     setLiveRoundActive(true)
     // Show the betting board instantly from the payload, without waiting for the
     // (iOS-throttled) loader revalidation.
-    setOptimisticBet({ roundId: payload.roundId, closesAt: payload.bettingClosesAt })
+    setLiveMirror({ id: payload.roundId, status: 'BETTING', bettingClosesAt: payload.bettingClosesAt, dice: [null, null, null] })
   })
   usePusherEvent<LiveEndedPayload>(GAME_CHANNEL, 'live:ended', () => {
     setLiveRoundActive(false)
-    setOptimisticBet(null)
+    setLiveMirror(null)
   })
 
   // Local competition state — updated immediately via Pusher (before loader revalidation)
@@ -1571,6 +1582,57 @@ export default function FishPrawnCrabGame() {
     revalidator.revalidate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveRoundActive])
+
+  // iOS Safari throttles the Pusher WebSocket while the live video decodes, so
+  // round:started / round:dice / round:resolved can arrive late or not at all —
+  // the betting board and the dice result never update. Poll a tiny endpoint
+  // while in live mode as a socket-independent fallback: mirror the FULL active
+  // round (status + dice) so both the board and the reveal work, and revalidate
+  // once per phase transition to sync balances/settlement. Functional setState
+  // skips re-renders when nothing changed, so the video stays smooth.
+  const lastPolledKeyRef = useRef('')
+  useEffect(() => {
+    if (mode !== 'live') return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/live-round', { cache: 'no-store' })
+        if (!res.ok || cancelled) return
+        const { round } = (await res.json()) as { round: LiveMirror | null }
+        if (cancelled) return
+
+        setLiveMirror(prev => {
+          if (!round) return prev === null ? prev : null
+          if (prev && prev.id === round.id && prev.status === round.status &&
+              prev.bettingClosesAt === round.bettingClosesAt &&
+              prev.dice[0] === round.dice[0] && prev.dice[1] === round.dice[1] && prev.dice[2] === round.dice[2]) {
+            return prev
+          }
+          return round
+        })
+
+        if (round) {
+          setRevealedDice(prev => {
+            const next = round.dice.map(d => (d ? (d.toLowerCase() as SymbolKey) : null))
+            if (prev.length === next.length && prev.every((v, i) => v === next[i])) return prev
+            return next
+          })
+        }
+
+        // One revalidation per phase transition (new round / lock / resolve) to
+        // sync wallet balance, settlement modal and history — not every poll.
+        const key = round ? `${round.id}:${round.status}` : 'none'
+        if (key !== lastPolledKeyRef.current) {
+          lastPolledKeyRef.current = key
+          revalidator.revalidate()
+        }
+      } catch { /* ignore */ }
+    }
+    poll()
+    const id = setInterval(poll, 2500)
+    return () => { cancelled = true; clearInterval(id) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
 
   // Locally-mirrored dice for the open round. Initialised from the loader and
   // updated optimistically as the admin reveals each die (round:dice event).
@@ -1626,11 +1688,11 @@ export default function FishPrawnCrabGame() {
   // URL + countdown reflect the new round (otherwise we'd keep showing the
   // stale "WAITING FOR RESULT" state from a previous round, or "no round").
   usePusherEvent<RoundStartedPayload>(presenceChannel, 'round:started', payload => {
-    setOptimisticBet({ roundId: payload.roundId, closesAt: payload.bettingClosesAt })
+    setLiveMirror({ id: payload.roundId, status: 'BETTING', bettingClosesAt: payload.bettingClosesAt, dice: [null, null, null] })
     revalidator.revalidate()
   })
   usePusherEvent<RoundResolvedPayload>(presenceChannel, 'round:resolved', () => {
-    setOptimisticBet(null)
+    setLiveMirror(null)
     revalidator.revalidate()
   })
   // Admin updated the stream URL mid-round → revalidate so the new feed
@@ -1644,7 +1706,7 @@ export default function FishPrawnCrabGame() {
   // Admin ended the live stream (End Live button) or updated the schedule →
   // revalidate so liveStreamUrl + schedule come fresh from the server.
   usePusherEvent<LiveEndedPayload>(presenceChannel, 'live:ended', () => {
-    setOptimisticBet(null)
+    setLiveMirror(null)
     revalidator.revalidate()
   })
   usePusherEvent<LiveScheduledPayload>(presenceChannel, 'live:scheduled', () => {
@@ -1692,11 +1754,19 @@ export default function FishPrawnCrabGame() {
   // Each die the admin picks (or changes) shows up here in real time.
   usePusherEvent<RoundDicePayload>(presenceChannel, 'round:dice', payload => {
     if (!liveRound || payload.roundId !== liveRound.id) return
+    const i = payload.dieIndex - 1
+    const sym = payload.symbol.toLowerCase()
     setRevealedDice(prev => {
       const next = [...prev]
-      const i = payload.dieIndex - 1
-      if (i >= 0 && i < 3) next[i] = payload.symbol.toLowerCase() as SymbolKey
+      if (i >= 0 && i < 3) next[i] = sym as SymbolKey
       return next
+    })
+    // Keep the round mirror's dice in sync too (source of truth for livePhase).
+    setLiveMirror(prev => {
+      if (!prev || prev.id !== payload.roundId || i < 0 || i >= 3) return prev
+      const dice = [...prev.dice]
+      dice[i] = sym
+      return { ...prev, dice }
     })
   })
 
@@ -2673,6 +2743,11 @@ export default function FishPrawnCrabGame() {
       {/* ── LIVE FULL-SCREEN OVERLAY (mobile only) ──────────────────────── */}
       {mode === 'live' && (
         <div className="fixed inset-0 z-[100] bg-black md:hidden">
+          {/* TEMP DEBUG — remove after fixing the iOS betting-board issue. */}
+          <div className="pointer-events-none absolute left-1 z-[120] font-mono text-[9px] leading-tight"
+            style={{ top: 'max(env(safe-area-inset-top), 2px)', color: '#0f0', textShadow: '0 0 2px #000' }}>
+            ph:{livePhase} t:{liveTimer} lr:{liveRound?.status ?? 'null'}/{liveRound?.id?.slice(-4) ?? '-'} dice:{(liveRound?.dice ?? []).map(d => d ? String(d).slice(0, 2) : '_').join(',')} mir:{liveMirror?.id?.slice(-4) ?? '-'} ldr:{loaderData.liveRound?.id?.slice(-4) ?? '-'}
+          </div>
           {/* Full-screen video — transform forces a new compositing layer on
               iOS Safari, preventing the blank/black iframe rendering bug that
               occurs when an iframe sits inside a position:fixed parent. */}
