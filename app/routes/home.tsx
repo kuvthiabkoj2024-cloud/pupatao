@@ -1493,7 +1493,30 @@ export default function FishPrawnCrabGame() {
   const [overlayWalletOpen, setOverlayWalletOpen] = useState(false)
   const [overlayProfileOpen, setOverlayProfileOpen] = useState(false)
   const [joinGroupOpen, setJoinGroupOpen] = useState(false)
-  const liveRound = loaderData.liveRound
+  // Client "now" clock (declared early — the effective liveRound below needs it).
+  const [nowTick, setNowTick] = useState(() => Date.now())
+
+  // Optimistic betting window taken straight from the round:started Pusher
+  // payload. iOS Safari throttles the loader revalidation while the live video
+  // plays, so a short betting window can close before the fresh round data
+  // arrives and the board never appears. The payload already carries
+  // bettingClosesAt, so we synthesize a BETTING round from it until the loader
+  // catches up. The `> nowTick` guard means it can ONLY add the (missing)
+  // betting phase — it never resurrects a stale awaiting/idle round.
+  const [optimisticBet, setOptimisticBet] = useState<{ roundId: string; closesAt: string } | null>(null)
+
+  const loaderRound = loaderData.liveRound
+  const liveRound = loaderRound ?? (
+    optimisticBet && new Date(optimisticBet.closesAt).getTime() > nowTick
+      ? {
+          id: optimisticBet.roundId,
+          status: 'BETTING' as 'BETTING' | 'LOCKED' | 'AWAITING_RESULT',
+          streamUrl: loaderData.liveStreamUrl ?? null,
+          bettingClosesAt: optimisticBet.closesAt as string | null,
+          dice: [null, null, null] as (string | null)[],
+        }
+      : null
+  )
   // Bet-locked users can watch a LIVE round but never see the betting board.
   const betLocked = loaderData.betLocked
   // The URL shown to customers: active round's stream takes priority; otherwise
@@ -1510,11 +1533,15 @@ export default function FishPrawnCrabGame() {
     setLiveRoundActive(!!loaderData.liveRound)
   }, [loaderData.liveRound?.id])
 
-  usePusherEvent<RoundStartedPayload>(GAME_CHANNEL, 'round:started', () => {
+  usePusherEvent<RoundStartedPayload>(GAME_CHANNEL, 'round:started', payload => {
     setLiveRoundActive(true)
+    // Show the betting board instantly from the payload, without waiting for the
+    // (iOS-throttled) loader revalidation.
+    setOptimisticBet({ roundId: payload.roundId, closesAt: payload.bettingClosesAt })
   })
   usePusherEvent<LiveEndedPayload>(GAME_CHANNEL, 'live:ended', () => {
     setLiveRoundActive(false)
+    setOptimisticBet(null)
   })
 
   // Local competition state — updated immediately via Pusher (before loader revalidation)
@@ -1567,9 +1594,9 @@ export default function FishPrawnCrabGame() {
   const [liveSettleModal, setLiveSettleModal] = useState<RoundSettledPayload | null>(null)
   const [rewardModal, setRewardModal] = useState<RewardCreditedPayload | null>(null)
 
-  // Tick a "now" clock every second while in LIVE mode so the countdown
-  // re-renders without jitter. Stays still in RANDOM mode.
-  const [nowTick, setNowTick] = useState(() => Date.now())
+  // Tick the "now" clock every second while in LIVE mode so the countdown
+  // re-renders without jitter. Stays still in RANDOM mode. (nowTick state is
+  // declared earlier — the effective liveRound depends on it.)
   useEffect(() => {
     if (mode !== 'live') return
     const id = setInterval(() => setNowTick(Date.now()), 1000)
@@ -1598,10 +1625,12 @@ export default function FishPrawnCrabGame() {
   // When the admin opens a new LIVE round, refresh our loader so the stream
   // URL + countdown reflect the new round (otherwise we'd keep showing the
   // stale "WAITING FOR RESULT" state from a previous round, or "no round").
-  usePusherEvent<RoundStartedPayload>(presenceChannel, 'round:started', () => {
+  usePusherEvent<RoundStartedPayload>(presenceChannel, 'round:started', payload => {
+    setOptimisticBet({ roundId: payload.roundId, closesAt: payload.bettingClosesAt })
     revalidator.revalidate()
   })
   usePusherEvent<RoundResolvedPayload>(presenceChannel, 'round:resolved', () => {
+    setOptimisticBet(null)
     revalidator.revalidate()
   })
   // Admin updated the stream URL mid-round → revalidate so the new feed
@@ -1615,6 +1644,7 @@ export default function FishPrawnCrabGame() {
   // Admin ended the live stream (End Live button) or updated the schedule →
   // revalidate so liveStreamUrl + schedule come fresh from the server.
   usePusherEvent<LiveEndedPayload>(presenceChannel, 'live:ended', () => {
+    setOptimisticBet(null)
     revalidator.revalidate()
   })
   usePusherEvent<LiveScheduledPayload>(presenceChannel, 'live:scheduled', () => {

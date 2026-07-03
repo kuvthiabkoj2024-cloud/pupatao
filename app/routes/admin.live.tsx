@@ -375,7 +375,44 @@ export async function action({ request }: Route.ActionArgs) {
 
     // These ops don't need a roundId — handle them before the roundId gate.
     if (op === 'endLive') {
+      // Void any round still in flight so bets never get stuck in BETTING (which
+      // would leave stakes deducted and never settled). Refund every unsettled
+      // stake to the wallet it was placed from and mark the round CANCELLED.
+      const openRounds = await prisma.gameRound.findMany({
+        where: { mode: 'LIVE', status: { in: ['BETTING', 'LOCKED', 'AWAITING_RESULT'] } },
+        select: { id: true },
+      })
+      let refundedBets = 0
+      for (const r of openRounds) {
+        const bets = await prisma.bet.findMany({
+          where: { roundId: r.id, result: null },
+          select: { id: true, userId: true, walletId: true, amount: true },
+        })
+        await prisma.$transaction(async db => {
+          for (const b of bets) {
+            const wallet = await db.wallet.findUnique({ where: { id: b.walletId } })
+            if (!wallet) continue
+            const balanceAfter = wallet.balance + b.amount
+            await db.wallet.update({ where: { id: b.walletId }, data: { balance: balanceAfter, version: { increment: 1 } } })
+            await db.bet.update({ where: { id: b.id }, data: { result: 'REFUNDED', payout: b.amount } })
+            await db.transaction.create({
+              data: {
+                userId: b.userId, walletId: b.walletId, type: 'ADJUSTMENT', amount: b.amount,
+                balanceBefore: wallet.balance, balanceAfter, status: 'COMPLETED',
+                roundId: r.id, idempotencyKey: crypto.randomUUID(),
+                note: 'Live ended without result — stake refunded',
+              },
+            })
+            refundedBets++
+          }
+          await db.gameRound.update({ where: { id: r.id }, data: { status: 'CANCELLED' } })
+        })
+      }
+
       await setLiveStreamUrl(null, admin.id)
+      await prisma.auditLog.create({
+        data: { actorId: admin.id, action: 'live.end', target: 'live', metadata: { cancelledRounds: openRounds.length, refundedBets } },
+      }).catch(() => { /* audit best-effort */ })
       notifyPresenceLive('live:ended', {})
       notifyAdmin('live:ended', {})
       notifyGame('live:ended', {})
