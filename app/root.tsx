@@ -245,11 +245,9 @@ function PWAInstallPrompt() {
       !(window as any).MSStream
     setIsIos(ios)
 
-    if (ios) {
-      // iOS Safari doesn't fire beforeinstallprompt — show instructions after delay
-      const t = setTimeout(() => setShow(true), 5000)
-      return () => clearTimeout(t)
-    }
+    // iOS: do NOT show the install prompt — iOS users stay in Safari (where the
+    // live video plays reliably). Only Android gets the install prompt below.
+    if (ios) return
 
     // Android / Chrome — beforeinstallprompt fires early (before React hydrates),
     // so entry.client.tsx captures it globally. Check that first; fall back to
