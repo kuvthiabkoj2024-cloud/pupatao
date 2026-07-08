@@ -1606,6 +1606,17 @@ export default function FishPrawnCrabGame() {
   const lastPolledKeyRef = useRef('')
   useEffect(() => {
     if (mode !== 'live') return
+    // ONLY iOS needs this fallback — iOS Safari throttles the Pusher WebSocket
+    // while the live video decodes, so events arrive late. Android/desktop get
+    // everything instantly over Pusher, so polling there would just multiply
+    // server requests (and DB load) for zero benefit. Gating to iOS cuts the
+    // bulk of the traffic.
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+    const isIosClient =
+      /iP(hone|ad|od)/.test(ua) ||
+      (/Macintosh/.test(ua) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1)
+    if (!isIosClient) return
+
     let cancelled = false
     const poll = async () => {
       try {
@@ -1645,7 +1656,7 @@ export default function FishPrawnCrabGame() {
       } catch { /* ignore */ }
     }
     poll()
-    const id = setInterval(poll, 2500)
+    const id = setInterval(poll, 4000)
     return () => { cancelled = true; clearInterval(id) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode])
