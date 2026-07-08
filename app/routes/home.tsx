@@ -1901,14 +1901,12 @@ export default function FishPrawnCrabGame() {
   // Pause BGM when the PWA goes to background, resume on return.
   useEffect(() => { attachBgMusicVisibilityGuard() }, [])
 
-  // Keep the serverless function warm by pinging /api/warm on mount and every
-  // 60 s. Vercel keeps a function instance alive for ~5 min after last use;
-  // regular pings prevent cold starts for active players.
+  // Warm the serverless function ONCE on load. The old every-60s ping was pure
+  // overhead (dozens of requests/user/hour) — active gameplay keeps the function
+  // warm anyway, and an occasional cold start is cheaper than the request flood.
   useEffect(() => {
     if (!authUser) return
     fetch('/api/warm').catch(() => { })
-    const id = setInterval(() => fetch('/api/warm').catch(() => { }), 60_000)
-    return () => clearInterval(id)
   }, [authUser])
 
   // Pre-compute adversarial dice in the background whenever the bet layout
