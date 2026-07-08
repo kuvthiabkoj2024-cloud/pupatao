@@ -1596,21 +1596,17 @@ export default function FishPrawnCrabGame() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveRoundActive])
 
-  // iOS Safari throttles the Pusher WebSocket while the live video decodes, so
-  // round:started / round:dice / round:resolved can arrive late or not at all —
-  // the betting board and the dice result never update. Poll a tiny endpoint
-  // while in live mode as a socket-independent fallback: mirror the FULL active
-  // round (status + dice) so both the board and the reveal work, and revalidate
-  // once per phase transition to sync balances/settlement. Functional setState
-  // skips re-renders when nothing changed, so the video stays smooth.
+  // Live-state fallback for iOS Safari (which throttles the Pusher socket while
+  // the video decodes, so round events arrive late). Kept lean to minimise load:
+  //   • iOS only — Android/desktop use Pusher directly and never poll
+  //   • paused while the tab is hidden (backgrounded)
+  //   • 5s interval
+  //   • /api/live-round is EDGE-CACHED (~3s): the round state is identical for
+  //     every viewer, so the DB is hit ~once per few seconds TOTAL regardless of
+  //     how many iOS clients poll — that's what killed the request/DB flood.
   const lastPolledKeyRef = useRef('')
   useEffect(() => {
     if (mode !== 'live') return
-    // ONLY iOS needs this fallback — iOS Safari throttles the Pusher WebSocket
-    // while the live video decodes, so events arrive late. Android/desktop get
-    // everything instantly over Pusher, so polling there would just multiply
-    // server requests (and DB load) for zero benefit. Gating to iOS cuts the
-    // bulk of the traffic.
     const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
     const isIosClient =
       /iP(hone|ad|od)/.test(ua) ||
@@ -1619,8 +1615,9 @@ export default function FishPrawnCrabGame() {
 
     let cancelled = false
     const poll = async () => {
+      if (typeof document !== 'undefined' && document.hidden) return // skip hidden tab
       try {
-        const res = await fetch('/api/live-round', { cache: 'no-store' })
+        const res = await fetch('/api/live-round') // edge-cached — no `no-store`
         if (!res.ok || cancelled) return
         const { round } = (await res.json()) as { round: LiveMirror | null }
         if (cancelled) return
@@ -1643,11 +1640,6 @@ export default function FishPrawnCrabGame() {
           })
         }
 
-        // Revalidate only when the ROUND changes (new round starts, or it
-        // clears on resolve/end) — to refresh wallet balance, my-bets and
-        // history. NOT on mid-round status/dice changes: the mirror above
-        // already drives the board + reveal, so extra loader re-runs here would
-        // just churn the main thread and stutter the iOS video for no gain.
         const rid = round?.id ?? 'none'
         if (rid !== lastPolledKeyRef.current) {
           lastPolledKeyRef.current = rid
@@ -1656,7 +1648,7 @@ export default function FishPrawnCrabGame() {
       } catch { /* ignore */ }
     }
     poll()
-    const id = setInterval(poll, 4000)
+    const id = setInterval(poll, 5000)
     return () => { cancelled = true; clearInterval(id) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode])
