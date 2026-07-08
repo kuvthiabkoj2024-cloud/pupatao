@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef, memo, type ReactNode } from 'react'
 import confetti from 'canvas-confetti'
-import { Form, Link, useFetcher, useLoaderData, useOutletContext, useRevalidator, useSearchParams } from 'react-router'
+import { Form, Link, useFetcher, useLoaderData, useNavigate, useOutletContext, useRevalidator, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import type { Route } from './+types/home'
 import { LoginModal } from '~/components/LoginModal'
 import { JoinGroupModal } from '~/components/JoinGroupModal'
 import { PushAutoEnable } from '~/components/PushAutoEnable'
+import { ReferralModal, type ReferralListItem } from '~/components/ReferralModal'
 import { RegisterModal } from '~/components/RegisterModal'
 import { FeatureTour, type TourStep } from '~/components/FeatureTour'
 import { useUser } from '~/hooks/use-user'
@@ -33,7 +34,7 @@ import {
   type RoundStartedPayload,
   type TxUpdatedPayload,
 } from '~/lib/pusher-channels'
-import { ArrowDown, ArrowUp, ArrowUpDown, BookOpen, CalendarClock, Check, ChevronDown, Eye, LogOut, MessageCircle, ReceiptText, RefreshCw, Undo, User, Users, Volume2, VolumeOff, Wallet, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, BookOpen, CalendarClock, Check, ChevronDown, Eye, LogOut, MessageCircle, ReceiptText, RefreshCw, Share2, Undo, User, Users, Volume2, VolumeOff, Wallet, X } from 'lucide-react'
 
 type SymbolKey = 'fish' | 'prawn' | 'crab' | 'rooster' | 'gourd' | 'frog'
 
@@ -1399,6 +1400,8 @@ export default function FishPrawnCrabGame() {
   }, [serverWallets?.demo, serverWallets?.real, serverWallets?.promo])
   const { startRollSound, stopRollSound, playWin, playLose } = useSoundEngine()
 
+  const navigate = useNavigate()
+
   // Display name + initials from the authenticated session. Falls back to the
   // client-side demo user (useful when anonymous visitors land on the game page).
   const isAnonymous = !authUser
@@ -1412,6 +1415,16 @@ export default function FishPrawnCrabGame() {
 
   const [balance, setBalance] = useState(0)
   useEffect(() => { setBalance(user.balance) }, [user.balance])
+
+  // Referral modal, opened from the live screen. Data is lazy-loaded on first
+  // open so the home loader stays light. Anonymous users go to register first.
+  const [referralOpen, setReferralOpen] = useState(false)
+  const referralFetcher = useFetcher<{ code: string; shareUrl: string; referrals: ReferralListItem[] }>()
+  const openReferral = useCallback(() => {
+    if (isAnonymous) { navigate('/register'); return }
+    if (!referralFetcher.data && referralFetcher.state === 'idle') referralFetcher.load('/api/referral')
+    setReferralOpen(true)
+  }, [isAnonymous, navigate, referralFetcher])
 
   // Fetcher used to persist each completed round (self-play + player-entered live).
   // Skipped for anonymous visitors — they keep playing locally only.
@@ -2763,6 +2776,19 @@ export default function FishPrawnCrabGame() {
             )}
           </div>
 
+          {/* Referral share — sits just below the Reload button (top:142) so
+              users can invite friends without leaving the live screen. */}
+          <button
+            type="button"
+            onClick={openReferral}
+            className="absolute right-3 z-20 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold transition-transform active:scale-95"
+            style={{ top: 184, background: 'linear-gradient(135deg,#f59e0b,#b45309)', color: '#fff', boxShadow: '0 3px 16px rgba(0,0,0,0.7)' }}
+            title={t('referral.title')}
+          >
+            <Share2 size={14} />
+            {t('referral.shareLink')}
+          </button>
+
           {/* Top cover — hides platform native UI (FB viewer avatars/count) that
               bleeds through the iframe. Solid at top, fades out quickly. */}
           <div className="pointer-events-none absolute inset-x-0 top-0 h-25"
@@ -2777,13 +2803,15 @@ export default function FishPrawnCrabGame() {
             {/* Left: avatar (name hidden for privacy) */}
             <div className="relative z-10 flex items-center gap-2 min-w-0">
               <button
-                onClick={() => setOverlayProfileOpen(v => !v)}
+                // Anonymous visitors → straight to the register page (which
+                // auto-signs-them-in) instead of the profile dropdown.
+                onClick={() => { playClick(); if (isAnonymous) navigate('/register'); else setOverlayProfileOpen(v => !v) }}
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
                 style={{ background: '#4c1d95', border: '1px solid #a78bfa', color: '#e9d5ff' }}
               >
                 {initials || '?'}
               </button>
-              {overlayProfileOpen && (
+              {overlayProfileOpen && !isAnonymous && (
                 <ProfileDropdown name={displayName} onClose={() => setOverlayProfileOpen(false)} competitionEnabled={competitionMenuVisible} competitionType={loaderData.competitionType} onJoinGroup={() => setJoinGroupOpen(true)} />
               )}
             </div>
@@ -3310,14 +3338,14 @@ export default function FishPrawnCrabGame() {
         <div className='flex items-center gap-2'>
           <div className="relative">
             {isAnonymous ? (
-              // Unauthenticated: placeholder + quick Sign-in button that opens the modal.
+              // Unauthenticated: tap the profile area → register page (which
+              // auto-signs-them-in). Existing users can switch to login there.
               <button
                 type="button"
                 onClick={() => {
                   playClick()
                   ensureBgMusic()
-                  setLoginHint(undefined)
-                  setLoginOpen(true)
+                  navigate('/register')
                 }}
                 className="flex items-center gap-2.5 rounded-full sm:rounded-xl p-1 sm:p-2 transition-all hover:opacity-90"
                 style={{
@@ -4431,6 +4459,18 @@ export default function FishPrawnCrabGame() {
       )}
 
       <JoinGroupModal open={joinGroupOpen} onClose={() => setJoinGroupOpen(false)} />
+
+      {/* Referral modal — opened from the live-screen "Invite" button; data is
+          lazy-loaded via /api/referral on first open. */}
+      {referralOpen && referralFetcher.data && (
+        <ReferralModal
+          open={referralOpen}
+          onClose={() => setReferralOpen(false)}
+          shareUrl={referralFetcher.data.shareUrl}
+          code={referralFetcher.data.code}
+          referrals={referralFetcher.data.referrals}
+        />
+      )}
 
       {/* Sign-in overlay — opened from the Anonymous pill or when anonymous users try to switch to REAL */}
       <LoginModal

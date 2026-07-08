@@ -457,6 +457,7 @@ export const STRINGS = {
   // ─── Referral modal (opens from the profile card) ────────────────────
   "referral.title": { lo: "ແນະນໍາເພື່ອນ", en: "Invite a friend" },
   "referral.invite": { lo: "ແນະນໍາ", en: "Invite" },
+  "referral.shareLink": { lo: "ແຊຣລິ້ງ", en: "Share link" },
   "referral.description": {
     lo: "ຮັບ 10,000 ກີບ ຕໍ່ຜູ້ຖືກແນະນໍາ ທີ່ລົງທະບຽນ ແລະ ຝາກຄັ້ງທຳອິດສຳເລັດ.",
     en: "Got 10,000 Kip per referred friend who registers and completes their first top-up.",

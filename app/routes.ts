@@ -25,6 +25,7 @@ export default [
   route("api/mark-tour-seen", "routes/api.mark-tour-seen.tsx"),
   route("api/push-subscribe", "routes/api.push-subscribe.tsx"),
   route("api/live-round", "routes/api.live-round.tsx"),
+  route("api/referral", "routes/api.referral.tsx"),
   route("api/cron/notifications", "routes/api.cron.notifications.tsx"),
   route("api/admin/live-history", "routes/api.admin.live-history.tsx"),
   route("api/admin/wallet-summary", "routes/api.admin.wallet-summary.tsx"),

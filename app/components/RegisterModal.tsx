@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useFetcher } from 'react-router'
-import { Check, Loader, UserRoundPlus, X } from 'lucide-react'
+import { Check, Loader, LogIn, UserRoundPlus, X } from 'lucide-react'
 import { PasswordInput } from './PasswordInput'
 import { useT } from '~/lib/use-t'
 
@@ -165,38 +165,45 @@ export function RegisterModal({ open, onClose, next, hint, onSwitchToLogin }: Re
             </span>
           </label>
 
-          <button
-            type="submit"
-            disabled={submitting || !agreed}
-            className="flex items-center justify-center gap-2 mt-2 w-full rounded-xl py-3 text-sm font-bold  disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{
-              background: 'linear-gradient(135deg, #16a34a, #15803d)',
-              color: '#fff',
-              border: '2px solid #4ade80',
-            }}
-          >
-            {submitting ? <Loader size={16} className='animate-spin' /> : <UserRoundPlus size={16} />}
-            {submitting ? t('auth.creating') : t('auth.createAccount')}
-          </button>
-        </fetcher.Form>
+          {/* Login + Register side by side (flex). Login is a real button now
+              (not a text link) and shown first. */}
+          <div className="mt-2 flex items-stretch gap-2">
+            {onSwitchToLogin ? (
+              <button
+                type="button"
+                onClick={onSwitchToLogin}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold"
+                style={{ background: 'linear-gradient(135deg, #7c3aed, #4c1d95)', color: '#fff', border: '2px solid #a78bfa' }}
+              >
+                <LogIn size={16} />
+                {t('auth.signIn')}
+              </button>
+            ) : (
+              <a
+                href="/login"
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold"
+                style={{ background: 'linear-gradient(135deg, #7c3aed, #4c1d95)', color: '#fff', border: '2px solid #a78bfa' }}
+              >
+                <LogIn size={16} />
+                {t('auth.signIn')}
+              </a>
+            )}
 
-        <div className="mt-5 text-center text-sm" style={{ color: '#c4b5fd' }}>
-          {t('auth.alreadyHaveAccount')}{' '}&nbsp;
-          {onSwitchToLogin ? (
             <button
-              type="button"
-              onClick={onSwitchToLogin}
-              className="font-bold underline-offset-2 hover:underline"
-              style={{ color: '#fde68a' }}
+              type="submit"
+              disabled={submitting || !agreed}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                background: 'linear-gradient(135deg, #16a34a, #15803d)',
+                color: '#fff',
+                border: '2px solid #4ade80',
+              }}
             >
-              {t('auth.signIn')}
+              {submitting ? <Loader size={16} className='animate-spin' /> : <UserRoundPlus size={16} />}
+              {submitting ? t('auth.creating') : t('auth.createAccount')}
             </button>
-          ) : (
-            <a href="/login" className="font-bold" style={{ color: '#fde68a' }}>
-              {t('auth.signIn')}
-            </a>
-          )}
-        </div>
+          </div>
+        </fetcher.Form>
       </div>
     </div>
   )
