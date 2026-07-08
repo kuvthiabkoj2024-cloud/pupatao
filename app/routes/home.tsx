@@ -176,75 +176,75 @@ type YtHandle = { setSound: (muted: boolean) => void }
 // Mode) the poster + play button shows until the first tap — unavoidable.
 const YouTubeLivePlayer = forwardRef<YtHandle, { videoId: string; muted: boolean; className?: string }>(
   function YouTubeLivePlayer({ videoId, muted, className }, ref) {
-  const hostRef = useRef<HTMLDivElement>(null)
-  const playerRef = useRef<YtPlayer | null>(null)
-  const mutedRef = useRef(muted)
-  mutedRef.current = muted
+    const hostRef = useRef<HTMLDivElement>(null)
+    const playerRef = useRef<YtPlayer | null>(null)
+    const mutedRef = useRef(muted)
+    mutedRef.current = muted
 
-  // Called straight from the sound button's onClick (a real user gesture).
-  useImperativeHandle(ref, () => ({
-    setSound(m: boolean) {
+    // Called straight from the sound button's onClick (a real user gesture).
+    useImperativeHandle(ref, () => ({
+      setSound(m: boolean) {
+        const p = playerRef.current
+        if (!p) return
+        try {
+          if (m) p.mute()
+          else p.unMute()
+          p.playVideo()
+        } catch { /* player not ready */ }
+      },
+    }), [])
+
+    useEffect(() => {
+      let cancelled = false
+      loadYtApi().then(() => {
+        if (cancelled || !hostRef.current || !window.YT) return
+        // YT replaces the target element with its <iframe>, so give it a child.
+        const mount = document.createElement('div')
+        mount.style.width = '100%'
+        mount.style.height = '100%'
+        hostRef.current.appendChild(mount)
+        playerRef.current = new window.YT.Player(mount, {
+          width: '100%',
+          height: '100%',
+          videoId,
+          playerVars: {
+            autoplay: 1, mute: 1, playsinline: 1, controls: 0,
+            modestbranding: 1, rel: 0, fs: 0, disablekb: 1, iv_load_policy: 3,
+          },
+          events: {
+            onReady: (e: { target: YtPlayer }) => {
+              if (mutedRef.current) e.target.mute(); else e.target.unMute()
+              e.target.playVideo()
+            },
+            onStateChange: (e: { data: number; target: YtPlayer }) => {
+              // PAUSED → immediately resume so the user can't stop the live feed.
+              if (window.YT && e.data === window.YT.PlayerState.PAUSED) e.target.playVideo()
+            },
+          },
+        })
+      }).catch(() => { /* API blocked — nothing to play */ })
+      return () => {
+        cancelled = true
+        try { playerRef.current?.destroy() } catch { /* already gone */ }
+        playerRef.current = null
+      }
+    }, [videoId])
+
+    // Reflect the app's sound button onto the player. Tapping it also (re)starts
+    // playback, so the customer never has to find YouTube's own play button —
+    // even if the OS blocked autoplay, this tap is the gesture that starts it.
+    useEffect(() => {
       const p = playerRef.current
       if (!p) return
       try {
-        if (m) p.mute()
+        if (muted) p.mute()
         else p.unMute()
         p.playVideo()
       } catch { /* player not ready */ }
-    },
-  }), [])
+    }, [muted])
 
-  useEffect(() => {
-    let cancelled = false
-    loadYtApi().then(() => {
-      if (cancelled || !hostRef.current || !window.YT) return
-      // YT replaces the target element with its <iframe>, so give it a child.
-      const mount = document.createElement('div')
-      mount.style.width = '100%'
-      mount.style.height = '100%'
-      hostRef.current.appendChild(mount)
-      playerRef.current = new window.YT.Player(mount, {
-        width: '100%',
-        height: '100%',
-        videoId,
-        playerVars: {
-          autoplay: 1, mute: 1, playsinline: 1, controls: 0,
-          modestbranding: 1, rel: 0, fs: 0, disablekb: 1, iv_load_policy: 3,
-        },
-        events: {
-          onReady: (e: { target: YtPlayer }) => {
-            if (mutedRef.current) e.target.mute(); else e.target.unMute()
-            e.target.playVideo()
-          },
-          onStateChange: (e: { data: number; target: YtPlayer }) => {
-            // PAUSED → immediately resume so the user can't stop the live feed.
-            if (window.YT && e.data === window.YT.PlayerState.PAUSED) e.target.playVideo()
-          },
-        },
-      })
-    }).catch(() => { /* API blocked — nothing to play */ })
-    return () => {
-      cancelled = true
-      try { playerRef.current?.destroy() } catch { /* already gone */ }
-      playerRef.current = null
-    }
-  }, [videoId])
-
-  // Reflect the app's sound button onto the player. Tapping it also (re)starts
-  // playback, so the customer never has to find YouTube's own play button —
-  // even if the OS blocked autoplay, this tap is the gesture that starts it.
-  useEffect(() => {
-    const p = playerRef.current
-    if (!p) return
-    try {
-      if (muted) p.mute()
-      else p.unMute()
-      p.playVideo()
-    } catch { /* player not ready */ }
-  }, [muted])
-
-  return <div ref={hostRef} className={className} style={{ pointerEvents: 'auto' }} />
-})
+    return <div ref={hostRef} className={className} style={{ pointerEvents: 'auto' }} />
+  })
 
 // ── Facebook JS SDK player (Android/desktop only) ───────────────────────────
 // The plain plugins/video.php iframe gives us no control (no API, no mute
@@ -1060,7 +1060,7 @@ function ProfileDropdown({ name, onClose, competitionEnabled, competitionType, o
     { label: t('menu.playHistory'), icon: <ReceiptText size={18} />, href: '/history', desc: t('menu.playHistoryDesc') },
     { label: t('menu.profile'), icon: <User size={18} />, href: '/profile', desc: t('menu.profileDesc') },
     { label: t('menu.rules'), icon: <BookOpen size={18} />, href: '/rules', desc: t('menu.rulesDesc') },
-    { label: t('menu.contactAdmin'), icon: <MessageCircle size={18} />, href: 'https://wa.me/8562076350786', desc: t('menu.contactAdminDesc'), external: true },
+    { label: t('menu.contactAdmin'), icon: <MessageCircle size={18} />, href: 'https://wa.me/8562078959344', desc: t('menu.contactAdminDesc'), external: true },
     // Join Group menu — temporarily disabled (re-enable later by uncommenting):
     // { label: t('menu.joinGroup'), icon: <Users size={18} />, desc: t('menu.joinGroupDesc'), onClick: onJoinGroup },
   ]
@@ -1335,15 +1335,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   const myLiveBets = _hideAllMyBets
     ? []
     : _myRawBets.map(b => ({
-        id: b.id,
-        kind: b.kind as 'SYMBOL' | 'RANGE' | 'PAIR' | 'SUM',
-        amount: b.amount,
-        symbol: b.symbol as string | null,
-        range: b.range as string | null,
-        pairA: b.pairA as string | null,
-        pairB: b.pairB as string | null,
-        exactSum: b.exactSum as number | null,
-      }))
+      id: b.id,
+      kind: b.kind as 'SYMBOL' | 'RANGE' | 'PAIR' | 'SUM',
+      amount: b.amount,
+      symbol: b.symbol as string | null,
+      range: b.range as string | null,
+      pairA: b.pairA as string | null,
+      pairB: b.pairB as string | null,
+      exactSum: b.exactSum as number | null,
+    }))
 
   const [selfPlay, live] = await Promise.all([
     prisma.gameRound.findMany({
@@ -1534,12 +1534,12 @@ export default function FishPrawnCrabGame() {
   const loaderRound = loaderData.liveRound
   const liveRound = liveMirror
     ? {
-        id: liveMirror.id,
-        status: liveMirror.status,
-        streamUrl: loaderData.liveStreamUrl ?? loaderRound?.streamUrl ?? null,
-        bettingClosesAt: liveMirror.bettingClosesAt,
-        dice: liveMirror.dice,
-      }
+      id: liveMirror.id,
+      status: liveMirror.status,
+      streamUrl: loaderData.liveStreamUrl ?? loaderRound?.streamUrl ?? null,
+      bettingClosesAt: liveMirror.bettingClosesAt,
+      dice: liveMirror.dice,
+    }
     : loaderRound
   // Bet-locked users can watch a LIVE round but never see the betting board.
   const betLocked = loaderData.betLocked
@@ -1625,8 +1625,8 @@ export default function FishPrawnCrabGame() {
         setLiveMirror(prev => {
           if (!round) return prev === null ? prev : null
           if (prev && prev.id === round.id && prev.status === round.status &&
-              prev.bettingClosesAt === round.bettingClosesAt &&
-              prev.dice[0] === round.dice[0] && prev.dice[1] === round.dice[1] && prev.dice[2] === round.dice[2]) {
+            prev.bettingClosesAt === round.bettingClosesAt &&
+            prev.dice[0] === round.dice[0] && prev.dice[1] === round.dice[1] && prev.dice[2] === round.dice[2]) {
             return prev
           }
           return round
