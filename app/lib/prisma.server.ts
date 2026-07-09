@@ -15,23 +15,35 @@ import { PrismaClient } from '@prisma/client'
 function buildDatabaseUrl(): string | undefined {
   const raw = process.env.DATABASE_URL
   if (!raw) return undefined
-  try {
-    const url = new URL(raw)
-    const setIfAbsent = (k: string, v: string) => {
-      if (!url.searchParams.has(k)) url.searchParams.set(k, v)
-    }
-    // Small pool per instance — serverless handles low concurrency each, but
-    // there are MANY instances, so the product is what matters.
-    setIfAbsent('maxPoolSize', '3')
-    // Release idle connections fast so idle/scaled-down instances free their slots.
-    setIfAbsent('maxIdleTimeMS', '10000')
-    // Fail fast instead of piling up waiters when the pool is momentarily full.
-    setIfAbsent('waitQueueTimeoutMS', '5000')
-    return url.toString()
-  } catch {
-    // If DATABASE_URL isn't a parseable URL for some reason, use it as-is.
-    return raw
+
+  // Work on the string directly — running a mongodb+srv URL through the URL
+  // class and re-serializing can mangle encoding. We only touch the query part.
+  let s = raw.trim()
+
+  // Heal an accidental double "?" (e.g. a param block pasted after the string
+  // already had one): every "?" after the first must be "&". Passwords in the
+  // URL are percent-encoded, so a literal "?" here is always a query separator.
+  const firstQ = s.indexOf('?')
+  if (firstQ !== -1) {
+    s = s.slice(0, firstQ + 1) + s.slice(firstQ + 1).replace(/\?/g, '&')
   }
+
+  const hasParam = (k: string) =>
+    new RegExp(`[?&]${k}=`, 'i').test(s) // already present (any case) → leave it
+  const append = (k: string, v: string) => {
+    if (hasParam(k)) return
+    s += (s.includes('?') ? '&' : '?') + `${k}=${v}`
+  }
+
+  // Small pool per instance — serverless handles low concurrency each, but
+  // there are MANY instances, so the product is what matters.
+  append('maxPoolSize', '3')
+  // Release idle connections fast so idle/scaled-down instances free their slots.
+  append('maxIdleTimeMS', '10000')
+  // Fail fast instead of piling up waiters when the pool is momentarily full.
+  append('waitQueueTimeoutMS', '5000')
+
+  return s
 }
 
 // Single Prisma instance per process. Prevents "too many connections" during
