@@ -1596,62 +1596,10 @@ export default function FishPrawnCrabGame() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveRoundActive])
 
-  // Live-state fallback for iOS Safari (which throttles the Pusher socket while
-  // the video decodes, so round events arrive late). Kept lean to minimise load:
-  //   • iOS only — Android/desktop use Pusher directly and never poll
-  //   • paused while the tab is hidden (backgrounded)
-  //   • 5s interval
-  //   • /api/live-round is EDGE-CACHED (~3s): the round state is identical for
-  //     every viewer, so the DB is hit ~once per few seconds TOTAL regardless of
-  //     how many iOS clients poll — that's what killed the request/DB flood.
-  const lastPolledKeyRef = useRef('')
-  useEffect(() => {
-    if (mode !== 'live') return
-    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
-    const isIosClient =
-      /iP(hone|ad|od)/.test(ua) ||
-      (/Macintosh/.test(ua) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1)
-    if (!isIosClient) return
-
-    let cancelled = false
-    const poll = async () => {
-      if (typeof document !== 'undefined' && document.hidden) return // skip hidden tab
-      try {
-        const res = await fetch('/api/live-round') // edge-cached — no `no-store`
-        if (!res.ok || cancelled) return
-        const { round } = (await res.json()) as { round: LiveMirror | null }
-        if (cancelled) return
-
-        setLiveMirror(prev => {
-          if (!round) return prev === null ? prev : null
-          if (prev && prev.id === round.id && prev.status === round.status &&
-            prev.bettingClosesAt === round.bettingClosesAt &&
-            prev.dice[0] === round.dice[0] && prev.dice[1] === round.dice[1] && prev.dice[2] === round.dice[2]) {
-            return prev
-          }
-          return round
-        })
-
-        if (round) {
-          setRevealedDice(prev => {
-            const next = round.dice.map(d => (d ? (d.toLowerCase() as SymbolKey) : null))
-            if (prev.length === next.length && prev.every((v, i) => v === next[i])) return prev
-            return next
-          })
-        }
-
-        const rid = round?.id ?? 'none'
-        if (rid !== lastPolledKeyRef.current) {
-          lastPolledKeyRef.current = rid
-          revalidator.revalidate()
-        }
-      } catch { /* ignore */ }
-    }
-    poll()
-    const id = setInterval(poll, 5000)
-    return () => { cancelled = true; clearInterval(id) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode])
+  // The /api/live-round polling fallback was REMOVED to cut request/DB load.
+  // Live state now comes only from Pusher (round:started / round:dice /
+  // round:resolved). Trade-off (accepted): on iOS Safari the socket is throttled
+  // while the video decodes, so the betting board / result may lag there.
 
   // Locally-mirrored dice for the open round. Initialised from the loader and
   // updated optimistically as the admin reveals each die (round:dice event).
