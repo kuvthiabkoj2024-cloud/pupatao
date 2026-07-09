@@ -366,21 +366,63 @@ function PWAInstallPrompt() {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let message = "Oops!"
-  let details = "An unexpected error occurred."
+  const isRouteError = error && typeof error === "object" && "status" in error
+  const status = isRouteError ? (error as { status: number }).status : 500
+  const is404 = status === 404
 
-  if (error && typeof error === "object" && "status" in error) {
-    const err = error as { status: number; statusText?: string; data?: string }
-    message = err.status === 404 ? "404" : "Error"
-    details = err.status === 404 ? "The requested page could not be found." : err.statusText || details
-  } else if (import.meta.env.DEV && error instanceof Error) {
-    details = error.message
+  // Transient failures under load (DB connection blips, a slow query that timed
+  // out) should NEVER leave the user on a dead "Oops" screen. For non-404
+  // errors we auto-reload a couple of times — by the time the page comes back
+  // the blip has usually passed, so the user just sees a brief "busy" flash.
+  // A short time-window on the retry counter means a fresh error later still
+  // gets its own retries (no permanent lockout, no infinite reload loop).
+  const [gaveUp, setGaveUp] = useState(false)
+  useEffect(() => {
+    if (is404 || typeof window === "undefined") return
+    const key = "__err_retry_" + window.location.pathname
+    let tries = 0
+    try {
+      const raw = sessionStorage.getItem(key)
+      if (raw) {
+        const parsed = JSON.parse(raw) as { n: number; t: number }
+        if (Date.now() - parsed.t < 60_000) tries = parsed.n
+      }
+    } catch { /* ignore */ }
+
+    if (tries >= 2) { setGaveUp(true); return }
+    try { sessionStorage.setItem(key, JSON.stringify({ n: tries + 1, t: Date.now() })) } catch { /* ignore */ }
+    const timer = setTimeout(() => window.location.reload(), 2000)
+    return () => clearTimeout(timer)
+  }, [is404])
+
+  if (is404) {
+    return (
+      <main className="min-h-screen flex flex-col items-center justify-center gap-3 p-6 text-center">
+        <h1 className="text-3xl font-bold">404</h1>
+        <p className="text-sm opacity-80">The requested page could not be found.</p>
+        <a href="/" className="mt-2 rounded-lg px-4 py-2 text-sm font-bold"
+          style={{ background: "#4338ca", color: "#fff" }}>ກັບໜ້າຫຼັກ · Home</a>
+      </main>
+    )
   }
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center gap-3 p-6 text-center">
-      <h1 className="text-3xl font-bold">{message}</h1>
-      <p className="text-sm opacity-80">{details}</p>
+    <main className="min-h-screen flex flex-col items-center justify-center gap-4 p-6 text-center"
+      style={{ background: "linear-gradient(160deg, #0f172a, #1e1b4b)", color: "#e9d5ff" }}>
+      <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-white/80 animate-spin" />
+      <div>
+        <p className="text-base font-bold" style={{ color: "#fde68a" }}>
+          ເວັບໄຊຕ໌ກຳລັງຫຍຸ້ງ, ກະລຸນາລໍຖ້າ…
+        </p>
+        <p className="mt-1 text-xs opacity-70">The site is busy — reconnecting…</p>
+      </div>
+      {gaveUp && (
+        <button type="button" onClick={() => { window.location.reload() }}
+          className="mt-1 rounded-lg px-5 py-2 text-sm font-bold"
+          style={{ background: "#4338ca", color: "#fff", border: "1px solid #818cf8" }}>
+          ລອງອີກຄັ້ງ · Try again
+        </button>
+      )}
     </main>
   )
 }
