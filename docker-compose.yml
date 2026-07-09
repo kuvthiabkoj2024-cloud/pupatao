@@ -4,6 +4,13 @@ services:
     container_name: pupatao-client
     build:
       context: .
+      # Public client vars — baked into the browser bundle at build time so
+      # Pusher realtime works. Values come from .env in this directory.
+      args:
+        VITE_PUSHER_KEY: ${VITE_PUSHER_KEY}
+        VITE_PUSHER_CLUSTER: ${VITE_PUSHER_CLUSTER}
+        VITE_MESSENGER_GROUP_URL: ${VITE_MESSENGER_GROUP_URL}
+        VITE_WHATSAPP_GROUP_URL: ${VITE_WHATSAPP_GROUP_URL}
     restart: always
     networks:
       - pupatao-share-network

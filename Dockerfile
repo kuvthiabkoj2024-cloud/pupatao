@@ -20,6 +20,19 @@ RUN npm install --no-audit --no-fund
 # Now bring in the source (host node_modules/.env excluded via .dockerignore)
 COPY . .
 
+# Client-side (VITE_*) variables must be present at BUILD time — Vite inlines
+# them into the browser bundle. These are PUBLIC values (Pusher app key/cluster,
+# group links), not secrets, so it's safe to embed them. Without them the client
+# ships with no Pusher key and realtime (live rounds) is silently disabled.
+ARG VITE_PUSHER_KEY
+ARG VITE_PUSHER_CLUSTER
+ARG VITE_MESSENGER_GROUP_URL
+ARG VITE_WHATSAPP_GROUP_URL
+ENV VITE_PUSHER_KEY=$VITE_PUSHER_KEY \
+    VITE_PUSHER_CLUSTER=$VITE_PUSHER_CLUSTER \
+    VITE_MESSENGER_GROUP_URL=$VITE_MESSENGER_GROUP_URL \
+    VITE_WHATSAPP_GROUP_URL=$VITE_WHATSAPP_GROUP_URL
+
 RUN npx prisma generate
 RUN npm run build
 
