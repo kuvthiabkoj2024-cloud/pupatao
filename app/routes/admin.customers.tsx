@@ -63,7 +63,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   const [allUsers, latestTxs] = await Promise.all([
     prisma.user.findMany({
       where,
-      include: { wallets: true },
+      // Select only the fields the table needs — `include: { wallets: true }`
+      // pulled every user's full record + full wallet rows across the wire
+      // (Vercel ↔ Atlas Hong Kong), which is slow for 1,000+ users.
+      select: {
+        id: true, tel: true, firstName: true, lastName: true,
+        status: true, role: true, createdAt: true,
+        selfPlayPhase: true, betLocked: true,
+        wallets: { select: { type: true, balance: true } },
+      },
     }),
     prisma.transaction.groupBy({
       by: ['userId'],

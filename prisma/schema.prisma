@@ -386,6 +386,9 @@ model Transaction {
   @@index([walletId, createdAt(sort: Desc)])
   @@index([roundId])
   @@index([type])
+  // Financial reports & dashboard filter by type + status (+ createdAt range).
+  // Without this only [type] was usable, forcing a status/date scan per query.
+  @@index([type, status, createdAt(sort: Desc)])
 }
 
 // Types you asked for: DEPOSIT, WITHDRAW, TRANSFER, WIN, LOSS.
@@ -510,6 +513,7 @@ model Bet {
   @@index([userId, createdAt(sort: Desc)])
   @@index([userId, walletId, createdAt(sort: Desc)]) // /history filter: real wallet only
   @@index([walletId, createdAt(sort: Desc)])          // admin play-history: wallet filter + sort
+  @@index([createdAt(sort: Desc)])                    // dashboard: bets-in-last-24h count
 }
 
 enum BetKind {

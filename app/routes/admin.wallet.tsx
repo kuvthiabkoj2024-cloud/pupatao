@@ -34,24 +34,22 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
     : {}
 
-  // Load all users + all deposit/withdraw totals, sort by available (REAL) balance desc,
-  // then paginate in memory.
-  const [allUsers, allTxGroups] = await Promise.all([
-    prisma.user.findMany({ where, include: { wallets: true } }),
-    prisma.transaction.groupBy({
-      by: ['userId', 'type'],
-      where: { status: 'COMPLETED', type: { in: ['DEPOSIT', 'WITHDRAW'] } },
-      _sum: { amount: true },
-    }),
-  ])
-
-  const totals = new Map<string, { deposit: number; withdraw: number }>()
-  for (const g of allTxGroups) {
-    const cur = totals.get(g.userId) ?? { deposit: 0, withdraw: 0 }
-    if (g.type === 'DEPOSIT') cur.deposit = g._sum.amount ?? 0
-    else if (g.type === 'WITHDRAW') cur.withdraw = g._sum.amount ?? 0
-    totals.set(g.userId, cur)
-  }
+  // Load all matching users (trimmed to just the fields the table needs) so we
+  // can sort by REAL balance, then paginate in memory. All the HEAVY per-row
+  // aggregates — deposit/withdraw totals + latest tx — are computed AFTER
+  // pagination, scoped to the 30 visible userIds only.
+  //
+  // Previously the deposit/withdraw groupBy scanned the ENTIRE Transaction
+  // collection (every user's whole history) on every page load, which is what
+  // made this page take ~18s in production. Scoping it to the page's userIds
+  // lets Mongo use the [userId, type, createdAt] index and reads a tiny slice.
+  const allUsers = await prisma.user.findMany({
+    where,
+    select: {
+      id: true, tel: true, firstName: true, lastName: true, status: true, createdAt: true,
+      wallets: { select: { type: true, balance: true } },
+    },
+  })
 
   const sorted = [...allUsers].sort((a, b) => {
     const ra = a.wallets.find(w => w.type === 'REAL')?.balance ?? 0
@@ -63,10 +61,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   const users = sorted.slice((page - 1) * pageSize, page * pageSize)
   const userIds = users.map(u => u.id)
 
-  // Fetch the latest DEPOSIT and WITHDRAW for each user on this page only.
-  // Orders desc so the first occurrence per user in JS is their latest.
+  // Page-scoped aggregates: deposit/withdraw totals + latest of each, for the
+  // visible userIds only. Orders desc so the first occurrence per user is latest.
   const latestTxLimit = Math.max(pageSize * 6, 300)
-  const [latestDeposits, latestWithdraws] = await Promise.all([
+  const [txGroups, latestDeposits, latestWithdraws] = await Promise.all([
+    prisma.transaction.groupBy({
+      by: ['userId', 'type'],
+      where: { userId: { in: userIds }, status: 'COMPLETED', type: { in: ['DEPOSIT', 'WITHDRAW'] } },
+      _sum: { amount: true },
+    }),
     prisma.transaction.findMany({
       where: { userId: { in: userIds }, type: 'DEPOSIT', status: 'COMPLETED' },
       orderBy: { createdAt: 'desc' },
@@ -80,6 +83,14 @@ export async function loader({ request }: Route.LoaderArgs) {
       take: latestTxLimit,
     }),
   ])
+
+  const totals = new Map<string, { deposit: number; withdraw: number }>()
+  for (const g of txGroups) {
+    const cur = totals.get(g.userId) ?? { deposit: 0, withdraw: 0 }
+    if (g.type === 'DEPOSIT') cur.deposit = g._sum.amount ?? 0
+    else if (g.type === 'WITHDRAW') cur.withdraw = g._sum.amount ?? 0
+    totals.set(g.userId, cur)
+  }
 
   const latestDepositMap = new Map<string, number>()
   const latestWithdrawMap = new Map<string, number>()
