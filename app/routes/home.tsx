@@ -1563,6 +1563,9 @@ export default function FishPrawnCrabGame() {
     // Show the betting board instantly from the payload, without waiting for the
     // (iOS-throttled) loader revalidation.
     setLiveMirror({ id: payload.roundId, status: 'BETTING', bettingClosesAt: payload.bettingClosesAt, dice: [null, null, null] })
+    // Refresh so the live stream URL for the new round lands for EVERY viewer
+    // (public channel), not only presence members.
+    jitterRevalidate()
   })
   usePusherEvent<LiveEndedPayload>(GAME_CHANNEL, 'live:ended', () => {
     setLiveRoundActive(false)
@@ -1665,21 +1668,20 @@ export default function FishPrawnCrabGame() {
   const presenceChannel = mode === 'live' && !isAnonymous ? PRESENCE_LIVE : null
   usePresenceMembers(presenceChannel)
 
-  // When the admin opens a new LIVE round, refresh our loader so the stream
-  // URL + countdown reflect the new round (otherwise we'd keep showing the
-  // stale "WAITING FOR RESULT" state from a previous round, or "no round").
-  usePusherEvent<RoundStartedPayload>(presenceChannel, 'round:started', payload => {
-    setLiveMirror({ id: payload.roundId, status: 'BETTING', bettingClosesAt: payload.bettingClosesAt, dice: [null, null, null] })
-    jitterRevalidate()
-  })
-  usePusherEvent<RoundResolvedPayload>(presenceChannel, 'round:resolved', () => {
+  // (round:started is handled once on the public GAME_CHANNEL above — every
+  // viewer gets it there, so no separate presence subscription is needed.)
+  // round:resolved / round:dice / round:streamUpdated are broadcast on the
+  // PUBLIC game channel (not just presence) so EVERY viewer receives them —
+  // Pusher presence channels are hard-capped at 100 members and exclude
+  // anonymous users, which meant the result never reached a real crowd.
+  usePusherEvent<RoundResolvedPayload>(GAME_CHANNEL, 'round:resolved', () => {
     setLiveMirror(null)
     jitterRevalidate()
   })
   // Admin updated the stream URL mid-round → revalidate so the new feed
   // replaces the old iframe without requiring an app restart.
   usePusherEvent<{ roundId: string; streamUrl: string | null }>(
-    presenceChannel,
+    GAME_CHANNEL,
     'round:streamUpdated',
     () => { jitterRevalidate() },
   )
@@ -1733,7 +1735,8 @@ export default function FishPrawnCrabGame() {
   })
 
   // Each die the admin picks (or changes) shows up here in real time.
-  usePusherEvent<RoundDicePayload>(presenceChannel, 'round:dice', payload => {
+  // Public game channel so every viewer sees the reveal (see note above).
+  usePusherEvent<RoundDicePayload>(GAME_CHANNEL, 'round:dice', payload => {
     if (!liveRound || payload.roundId !== liveRound.id) return
     const i = payload.dieIndex - 1
     const sym = payload.symbol.toLowerCase()

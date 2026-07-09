@@ -110,6 +110,9 @@ export function notifyPresenceLive(event: string, payload: unknown): Promise<voi
 // players that a LIVE round just opened/ended without inflating the
 // presence-live viewer count.
 export function notifyGame(event: 'round:started', payload: RoundStartedPayload): Promise<void>
+export function notifyGame(event: 'round:dice', payload: RoundDicePayload): Promise<void>
+export function notifyGame(event: 'round:resolved', payload: RoundResolvedPayload): Promise<void>
+export function notifyGame(event: 'round:streamUpdated', payload: RoundStreamUpdatedPayload): Promise<void>
 export function notifyGame(event: 'live:ended', payload: LiveEndedPayload): Promise<void>
 export function notifyGame(event: string, payload: unknown): Promise<void> {
   return triggerSafe(GAME_CHANNEL, event, payload)

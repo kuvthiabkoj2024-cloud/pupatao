@@ -479,6 +479,7 @@ export async function action({ request }: Route.ActionArgs) {
       // new feed without waiting for a manual refresh.
       const payload = { roundId, streamUrl }
       notifyPresenceLive('round:streamUpdated', payload)
+      notifyGame('round:streamUpdated', payload) // public: every viewer, no presence cap
       notifyAdmin('round:streamUpdated', payload)
       return { ok: true }
     }
@@ -517,6 +518,7 @@ export async function action({ request }: Route.ActionArgs) {
         symbol: symbol as string,
       }
       notifyPresenceLive('round:dice', payload)
+      notifyGame('round:dice', payload) // public: every viewer, no presence cap
       notifyAdmin('round:dice', payload)
       return { ok: true }
     }
@@ -790,6 +792,7 @@ export async function action({ request }: Route.ActionArgs) {
       const resolvedPayload = { roundId, mode: 'LIVE' as const, dice: dice as string[], diceSum }
       notifyAdmin('round:resolved', resolvedPayload)
       notifyPresenceLive('round:resolved', resolvedPayload)
+      notifyGame('round:resolved', resolvedPayload) // public: every viewer, no presence cap
       for (const grp of playerGroups.values()) {
         const grpKey = `${grp.userId}:${grp.walletId}`
         const newBalance = newBalances[grpKey] ?? 0
