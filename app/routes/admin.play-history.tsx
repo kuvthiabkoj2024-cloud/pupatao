@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Form, Link, useFetcher, useLoaderData, useNavigation, useRevalidator, useSearchParams } from 'react-router'
 import { ArrowDown, ArrowDownCircle, ArrowUp, ArrowUpCircle, ArrowUpDown, Eye, Lock, Loader, Search, Wallet, X } from 'lucide-react'
 import type { Route } from './+types/admin.play-history'
@@ -187,17 +187,21 @@ export default function AdminPlayHistory() {
   }, [lockFetcher.state, lockFetcher.data, revalidator])
 
   const onFirstPage = data.page === 1
-  // Debounce bet:placed revalidations — multiple bets in quick succession (e.g.
-  // a player placing 5 bets at once) collapse into a single reload after 600ms.
-  const betDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
-  usePusherEvent<BetPlacedPayload>(ADMIN_CHANNEL, 'bet:placed', () => {
+  // This page's loader is the HEAVIEST in the admin (it scans the whole Bet
+  // collection — 50k+ rows). During live play `bet:placed`/`round:resolved`
+  // fire many times a minute, and re-running this query on each one stacked
+  // expensive queries on the DB (the request pile-up / 40s response times).
+  // Coalesce all realtime refreshes to at most once every 15s, first page only.
+  const lastLiveRevalidateRef = useRef(0)
+  const throttledLiveRevalidate = useCallback(() => {
     if (!onFirstPage) return
-    if (betDebounce.current) clearTimeout(betDebounce.current)
-    betDebounce.current = setTimeout(() => revalidator.revalidate(), 600)
-  })
-  usePusherEvent<RoundResolvedPayload>(ADMIN_CHANNEL, 'round:resolved', () => {
-    if (onFirstPage) revalidator.revalidate()
-  })
+    const now = Date.now()
+    if (now - lastLiveRevalidateRef.current < 15000) return
+    lastLiveRevalidateRef.current = now
+    revalidator.revalidate()
+  }, [onFirstPage, revalidator])
+  usePusherEvent<BetPlacedPayload>(ADMIN_CHANNEL, 'bet:placed', throttledLiveRevalidate)
+  usePusherEvent<RoundResolvedPayload>(ADMIN_CHANNEL, 'round:resolved', throttledLiveRevalidate)
 
   function pageHref(p: number) {
     const next = new URLSearchParams(params)
