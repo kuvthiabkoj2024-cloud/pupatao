@@ -15,6 +15,26 @@
 
 import { prisma } from './prisma.server'
 
+// ── In-memory read cache (per serverless instance) ──────────────────────────
+// System settings are read on almost every request (competition config on the
+// root loader, sleep mode per roll, stream URL/schedule on the live page) but
+// only change when an admin toggles them. Caching them for a few seconds strips
+// out the vast majority of `systemSetting` queries — which is what was
+// overwhelming the Mongo connection pool under load (the "pool cleared" crash).
+// An admin change propagates within at most the TTL (setters also clear it on
+// the instance that ran the write).
+const _ssCache = new Map<string, { value: unknown; expires: number }>()
+function ssCached<T>(key: string, ttlMs: number, fetcher: () => Promise<T>): Promise<T> {
+  const now = Date.now()
+  const hit = _ssCache.get(key)
+  if (hit && hit.expires > now) return Promise.resolve(hit.value as T)
+  return fetcher().then(value => {
+    _ssCache.set(key, { value, expires: now + ttlMs })
+    return value
+  })
+}
+function ssInvalidate(...keys: string[]) { for (const k of keys) _ssCache.delete(k) }
+
 export const SLEEP_MODE_KEY              = 'sleepMode'
 export const COMPETITION_ENABLED_KEY     = 'competitionEnabled'
 export const COMPETITION_RULES_KEY       = 'competitionRules'
@@ -44,15 +64,17 @@ export const LIVE_SCHEDULE_NOTICE_KEY   = 'liveScheduleNotice'
 export const LIVE_BETTING_SECONDS_KEY   = 'liveBettingSeconds'
 
 export async function getSleepMode(): Promise<boolean> {
-  try {
-    const setting = await prisma.systemSetting.findUnique({
-      where: { key: SLEEP_MODE_KEY },
-      select: { value: true },
-    })
-    return setting?.value === 'true'
-  } catch {
-    return false // fail open — don't break the game if DB is slow
-  }
+  return ssCached('sleepMode', 3000, async () => {
+    try {
+      const setting = await prisma.systemSetting.findUnique({
+        where: { key: SLEEP_MODE_KEY },
+        select: { value: true },
+      })
+      return setting?.value === 'true'
+    } catch {
+      return false // fail open — don't break the game if DB is slow
+    }
+  })
 }
 
 export async function setSleepMode(active: boolean, adminId: string): Promise<void> {
@@ -61,18 +83,21 @@ export async function setSleepMode(active: boolean, adminId: string): Promise<vo
     create: { key: SLEEP_MODE_KEY, value: String(active), updatedBy: adminId },
     update: { value: String(active), updatedBy: adminId },
   })
+  ssInvalidate('sleepMode')
 }
 
 export async function getLiveStreamUrl(): Promise<string | null> {
-  try {
-    const setting = await prisma.systemSetting.findUnique({
-      where: { key: LIVE_STREAM_URL_KEY },
-      select: { value: true },
-    })
-    return setting?.value ?? null
-  } catch {
-    return null
-  }
+  return ssCached('liveStreamUrl', 3000, async () => {
+    try {
+      const setting = await prisma.systemSetting.findUnique({
+        where: { key: LIVE_STREAM_URL_KEY },
+        select: { value: true },
+      })
+      return setting?.value ?? null
+    } catch {
+      return null
+    }
+  })
 }
 
 export async function setLiveStreamUrl(url: string | null, adminId: string): Promise<void> {
@@ -85,23 +110,26 @@ export async function setLiveStreamUrl(url: string | null, adminId: string): Pro
       update: { value: url, updatedBy: adminId },
     })
   }
+  ssInvalidate('liveStreamUrl')
 }
 
 export async function getLiveSchedule(): Promise<{ start: string | null; end: string | null; notice: string | null }> {
-  try {
-    const [startSetting, endSetting, noticeSetting] = await Promise.all([
-      prisma.systemSetting.findUnique({ where: { key: LIVE_SCHEDULE_START_KEY }, select: { value: true } }),
-      prisma.systemSetting.findUnique({ where: { key: LIVE_SCHEDULE_END_KEY }, select: { value: true } }),
-      prisma.systemSetting.findUnique({ where: { key: LIVE_SCHEDULE_NOTICE_KEY }, select: { value: true } }),
-    ])
-    return {
-      start:  startSetting?.value  ?? null,
-      end:    endSetting?.value    ?? null,
-      notice: noticeSetting?.value ?? null,
+  return ssCached('liveSchedule', 8000, async () => {
+    try {
+      const [startSetting, endSetting, noticeSetting] = await Promise.all([
+        prisma.systemSetting.findUnique({ where: { key: LIVE_SCHEDULE_START_KEY }, select: { value: true } }),
+        prisma.systemSetting.findUnique({ where: { key: LIVE_SCHEDULE_END_KEY }, select: { value: true } }),
+        prisma.systemSetting.findUnique({ where: { key: LIVE_SCHEDULE_NOTICE_KEY }, select: { value: true } }),
+      ])
+      return {
+        start:  startSetting?.value  ?? null,
+        end:    endSetting?.value    ?? null,
+        notice: noticeSetting?.value ?? null,
+      }
+    } catch {
+      return { start: null, end: null, notice: null }
     }
-  } catch {
-    return { start: null, end: null, notice: null }
-  }
+  })
 }
 
 export async function setLiveSchedule(
@@ -124,6 +152,7 @@ export async function setLiveSchedule(
     upsertOrDelete(LIVE_SCHEDULE_END_KEY, end),
     upsertOrDelete(LIVE_SCHEDULE_NOTICE_KEY, notice ?? null),
   ])
+  ssInvalidate('liveSchedule')
 }
 
 // ─── Competition ─────────────────────────────────────────────────────────────
@@ -141,6 +170,7 @@ export async function setCompetitionEnabled(active: boolean, adminId: string): P
     create: { key: COMPETITION_ENABLED_KEY, value: String(active), updatedBy: adminId },
     update: { value: String(active), updatedBy: adminId },
   })
+  ssInvalidate('competitionConfig')
 }
 
 export interface CompetitionConfig {
@@ -156,6 +186,7 @@ export interface CompetitionConfig {
 }
 
 export async function getCompetitionConfig(): Promise<CompetitionConfig> {
+ return ssCached('competitionConfig', 8000, async () => {
   try {
     const settings = await prisma.systemSetting.findMany({
       where: {
@@ -201,6 +232,7 @@ export async function getCompetitionConfig(): Promise<CompetitionConfig> {
       summary: null, menuVisible: false, hasConfig: false, wasStarted: false,
     }
   }
+ })
 }
 
 export async function setCompetitionSummary(
@@ -217,6 +249,7 @@ export async function setCompetitionSummary(
       update: { value, updatedBy: adminId },
     })
   }
+  ssInvalidate('competitionConfig')
 }
 
 export async function setCompetitionConfig(
@@ -244,4 +277,5 @@ export async function setCompetitionConfig(
     upsert(COMPETITION_START_KEY, config.start),
     upsert(COMPETITION_END_KEY,   config.end),
   ])
+  ssInvalidate('competitionConfig')
 }

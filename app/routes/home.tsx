@@ -1586,13 +1586,22 @@ export default function FishPrawnCrabGame() {
     setMode(liveOn ? 'live' : 'random')
   }, [liveOn])
 
+  // Spread the "thundering herd": admin-triggered live events (round start/
+  // resolve, end-live) reach EVERY connected viewer at once, and if each fires a
+  // full loader revalidation instantly, that's a synchronized burst of DB
+  // queries that spikes connections and 500s under a crowd. Jitter each client's
+  // revalidation across a few seconds so the load is spread out.
+  const jitterRevalidate = useCallback(() => {
+    setTimeout(() => revalidator.revalidate(), Math.random() * 3000)
+  }, [revalidator])
+
   // Self-play viewers aren't subscribed to the presence-live channel, so when a
   // round opens/ends on the public game channel we refresh the loader here to
   // pull the current stream URL + round data (and to clear it when live ends).
   const didMountLiveRef = useRef(false)
   useEffect(() => {
     if (!didMountLiveRef.current) { didMountLiveRef.current = true; return }
-    revalidator.revalidate()
+    jitterRevalidate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveRoundActive])
 
@@ -1656,28 +1665,28 @@ export default function FishPrawnCrabGame() {
   // stale "WAITING FOR RESULT" state from a previous round, or "no round").
   usePusherEvent<RoundStartedPayload>(presenceChannel, 'round:started', payload => {
     setLiveMirror({ id: payload.roundId, status: 'BETTING', bettingClosesAt: payload.bettingClosesAt, dice: [null, null, null] })
-    revalidator.revalidate()
+    jitterRevalidate()
   })
   usePusherEvent<RoundResolvedPayload>(presenceChannel, 'round:resolved', () => {
     setLiveMirror(null)
-    revalidator.revalidate()
+    jitterRevalidate()
   })
   // Admin updated the stream URL mid-round → revalidate so the new feed
   // replaces the old iframe without requiring an app restart.
   usePusherEvent<{ roundId: string; streamUrl: string | null }>(
     presenceChannel,
     'round:streamUpdated',
-    () => { revalidator.revalidate() },
+    () => { jitterRevalidate() },
   )
 
   // Admin ended the live stream (End Live button) or updated the schedule →
   // revalidate so liveStreamUrl + schedule come fresh from the server.
   usePusherEvent<LiveEndedPayload>(presenceChannel, 'live:ended', () => {
     setLiveMirror(null)
-    revalidator.revalidate()
+    jitterRevalidate()
   })
   usePusherEvent<LiveScheduledPayload>(presenceChannel, 'live:scheduled', () => {
-    revalidator.revalidate()
+    jitterRevalidate()
   })
 
   // Admin reset all demo wallets — update in-app demo balance immediately.
@@ -1689,7 +1698,7 @@ export default function FishPrawnCrabGame() {
   usePusherEvent<CompetitionToggledPayload>(COMPETITION_CHANNEL, 'competition:toggled', payload => {
     setCompetitionEnabledLocal(payload.enabled)
     if (payload.enabled) setCompetitionMenuVisibleLocal(true)
-    revalidator.revalidate()
+    jitterRevalidate()
     if (payload.enabled && mode === 'random') {
       const cType = loaderData.competitionType
       // DEMO_LIVE: demo self-play blocked → switch to real
@@ -1769,7 +1778,7 @@ export default function FishPrawnCrabGame() {
   usePusherEvent<RoundResolvedPayload>(
     authUser ? userChannel(authUser.id) : null,
     'round:resolved',
-    () => { revalidator.revalidate() },
+    () => { jitterRevalidate() },
   )
   usePusherEvent<TxUpdatedPayload>(
     authUser ? userChannel(authUser.id) : null,
