@@ -370,31 +370,12 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   const status = isRouteError ? (error as { status: number }).status : 500
   const is404 = status === 404
 
-  // Transient failures under load (DB connection blips, a slow query that timed
-  // out) should NEVER leave the user on a dead "Oops" screen. For non-404
-  // errors we auto-reload a couple of times — by the time the page comes back
-  // the blip has usually passed, so the user just sees a brief "busy" flash.
-  // A short time-window on the retry counter means a fresh error later still
-  // gets its own retries (no permanent lockout, no infinite reload loop).
-  const [gaveUp, setGaveUp] = useState(false)
-  useEffect(() => {
-    if (is404 || typeof window === "undefined") return
-    const key = "__err_retry_" + window.location.pathname
-    let tries = 0
-    try {
-      const raw = sessionStorage.getItem(key)
-      if (raw) {
-        const parsed = JSON.parse(raw) as { n: number; t: number }
-        if (Date.now() - parsed.t < 60_000) tries = parsed.n
-      }
-    } catch { /* ignore */ }
-
-    if (tries >= 2) { setGaveUp(true); return }
-    try { sessionStorage.setItem(key, JSON.stringify({ n: tries + 1, t: Date.now() })) } catch { /* ignore */ }
-    const timer = setTimeout(() => window.location.reload(), 2000)
-    return () => clearTimeout(timer)
-  }, [is404])
-
+  // NOTE: We intentionally do NOT auto-reload here. Auto-reloading under load
+  // is dangerous — when the server is slow/overwhelmed, every error triggers a
+  // reload, which is another request piling onto the overload, which causes
+  // more errors and more reloads (a self-reinforcing storm). Instead we show a
+  // friendly message with a MANUAL retry button, so recovery is user-paced and
+  // never adds load automatically.
   if (is404) {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center gap-3 p-6 text-center">
@@ -409,20 +390,17 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center gap-4 p-6 text-center"
       style={{ background: "linear-gradient(160deg, #0f172a, #1e1b4b)", color: "#e9d5ff" }}>
-      <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-white/80 animate-spin" />
       <div>
         <p className="text-base font-bold" style={{ color: "#fde68a" }}>
-          ເວັບໄຊຕ໌ກຳລັງຫຍຸ້ງ, ກະລຸນາລໍຖ້າ…
+          ເວັບໄຊຕ໌ກຳລັງຫຍຸ້ງ, ກະລຸນາລອງໃໝ່
         </p>
-        <p className="mt-1 text-xs opacity-70">The site is busy — reconnecting…</p>
+        <p className="mt-1 text-xs opacity-70">The site is busy — please try again in a moment.</p>
       </div>
-      {gaveUp && (
-        <button type="button" onClick={() => { window.location.reload() }}
-          className="mt-1 rounded-lg px-5 py-2 text-sm font-bold"
-          style={{ background: "#4338ca", color: "#fff", border: "1px solid #818cf8" }}>
-          ລອງອີກຄັ້ງ · Try again
-        </button>
-      )}
+      <button type="button" onClick={() => { window.location.reload() }}
+        className="mt-1 rounded-lg px-5 py-2 text-sm font-bold"
+        style={{ background: "#4338ca", color: "#fff", border: "1px solid #818cf8" }}>
+        ລອງອີກຄັ້ງ · Try again
+      </button>
     </main>
   )
 }

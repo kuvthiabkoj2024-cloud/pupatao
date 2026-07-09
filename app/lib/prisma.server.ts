@@ -35,17 +35,20 @@ function buildDatabaseUrl(): string | undefined {
     s += (s.includes('?') ? '&' : '?') + `${k}=${v}`
   }
 
-  // Small pool per instance — serverless handles low concurrency each, but
-  // there are MANY instances, so the product is what matters. This cap (not
-  // idle time) is what protects the Atlas connection limit.
-  append('maxPoolSize', '3')
-  // Keep a connection alive through normal click-to-click pauses (60s) so warm
-  // instances don't re-do the TLS handshake to Atlas on every navigation —
-  // that re-handshake was a big part of the "sometimes slow" feel. Truly idle
-  // instances still release their (capped) connections.
+  // Pool size depends ENTIRELY on the deployment model:
+  //   • Single always-on server (Docker/VPS): ONE process serves ALL traffic,
+  //     so it needs a LARGE pool (20-50) or requests starve each other.
+  //   • Serverless (Vercel): MANY instances, each with its own pool, so each
+  //     must be SMALL (e.g. 3) to stay under the Atlas connection limit.
+  // Set DB_MAX_POOL_SIZE per deployment. Default suits a single server; a
+  // serverless deploy should set DB_MAX_POOL_SIZE=3.
+  append('maxPoolSize', process.env.DB_MAX_POOL_SIZE || '20')
+  // Keep a connection alive through normal click-to-click pauses so we don't
+  // re-do the TLS handshake to Atlas on every navigation.
   append('maxIdleTimeMS', '60000')
-  // Fail fast instead of piling up waiters when the pool is momentarily full.
-  append('waitQueueTimeoutMS', '5000')
+  // Wait a reasonable time for a free connection before erroring, so brief
+  // bursts don't surface to users as "site busy" errors.
+  append('waitQueueTimeoutMS', '15000')
 
   return s
 }
