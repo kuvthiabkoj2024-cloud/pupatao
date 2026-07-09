@@ -12,6 +12,7 @@ import { FeatureTour, type TourStep } from '~/components/FeatureTour'
 import { useUser } from '~/hooks/use-user'
 import type { SessionUser, SessionWallets } from '~/root'
 import { useT } from '~/lib/use-t'
+import { SELF_PLAY_ENABLED } from '~/lib/features'
 import { LanguageSwitch } from '~/components/LanguageSwitch'
 import { setBalance as storeSetBalance, setWalletBalance as storeSetWalletBalance, recordPlay, switchWallet, resetDemoBalance, hydrateBalances, DEMO_RESET_AMOUNT } from '~/lib/user-store'
 import { useSoundEngine, playClick, playChipPlace, playCoin, startBgMusic, stopBgMusic, attachBgMusicVisibilityGuard } from '~/hooks/use-sound-engine'
@@ -1495,7 +1496,7 @@ export default function FishPrawnCrabGame() {
   // Initial state is 'random' for SSR consistency; the persisted choice is
   // restored from localStorage in a mount effect below so we don't break
   // hydration.
-  const [mode, setMode] = useState<'random' | 'live'>('random')
+  const [mode, setMode] = useState<'random' | 'live'>(SELF_PLAY_ENABLED ? 'random' : 'live')
   // Feature discovery tour — runs in self-play mode so every target element
   // is reliably present. modeBeforeTourRef remembers what the player was on
   // so we can switch them back once the tour ends.
@@ -1581,9 +1582,13 @@ export default function FishPrawnCrabGame() {
   // live / the schedule clears). While it's on we FORCE live mode and hide the
   // self-play option; when it ends we fall back to self-play.
   const liveOn = liveRoundActive || !!activeStreamUrl
+  // The mode picker is locked whenever live is on OR self-play is globally
+  // disabled — in both cases the player can't switch to self-play.
+  const modeLocked = liveOn || !SELF_PLAY_ENABLED
 
   useEffect(() => {
-    setMode(liveOn ? 'live' : 'random')
+    // With self-play disabled the mode is permanently 'live'.
+    setMode(!SELF_PLAY_ENABLED || liveOn ? 'live' : 'random')
   }, [liveOn])
 
   // Spread the "thundering herd": admin-triggered live events (round start/
@@ -2508,6 +2513,7 @@ export default function FishPrawnCrabGame() {
   // round state (a `round:started` event might have fired before we joined
   // presence-live, in which case the local snapshot is already stale).
   const selectMode = useCallback((next: 'random' | 'live') => {
+    if (!SELF_PLAY_ENABLED) next = 'live' // self-play disabled — live only
     setMode(prev => {
       if (prev === next) return prev
       try { localStorage.setItem('fpc_play_mode', next) } catch { /* ignore */ }
@@ -2522,6 +2528,8 @@ export default function FishPrawnCrabGame() {
   }, [revalidator])
 
   const startTour = useCallback(() => {
+    // The tour demonstrates self-play; skip it entirely when self-play is off.
+    if (!SELF_PLAY_ENABLED) return
     modeBeforeTourRef.current = mode
     if (mode !== 'random') selectMode('random')
     setTourOpen(true)
@@ -2777,14 +2785,14 @@ export default function FishPrawnCrabGame() {
             {/* Center: mode selector — uses its own state to avoid conflicting with the main header */}
             <div className="relative z-10">
               <button
-                onClick={() => { if (liveOn) return; playClick(); setOverlayModeOpen(v => !v) }}
+                onClick={() => { if (modeLocked) return; playClick(); setOverlayModeOpen(v => !v) }}
                 className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold"
                 style={{ background: 'rgba(220,38,38,0.85)', color: '#fff', border: '1px solid #fca5a5' }}
               >
                 {t('game.modeLive')}
-                {!liveOn && <ChevronDown size={10} style={{ transform: overlayModeOpen ? 'rotate(180deg)' : 'none' }} />}
+                {!modeLocked && <ChevronDown size={10} style={{ transform: overlayModeOpen ? 'rotate(180deg)' : 'none' }} />}
               </button>
-              {overlayModeOpen && !liveOn && (
+              {overlayModeOpen && !modeLocked && (
                 <PickerDropdown
                   items={[{ key: 'random', label: t('game.modeSelf') }, { key: 'live', label: t('game.modeLive') }]}
                   active={mode}
@@ -3378,7 +3386,7 @@ export default function FishPrawnCrabGame() {
                 data-tour="mode-switcher"
                 // While live is on the mode is forced to LIVE (self-play hidden) —
                 // the switcher is locked and won't open a picker.
-                onClick={() => { if (liveOn) return; playClick(); setModeOpen(v => !v) }}
+                onClick={() => { if (modeLocked) return; playClick(); setModeOpen(v => !v) }}
                 className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold"
                 style={{
                   background: mode === 'live'
@@ -3392,11 +3400,11 @@ export default function FishPrawnCrabGame() {
                 aria-expanded={modeOpen}
               >
                 <span>{mode === 'live' ? t('game.modeLive') : t('game.modeSelf')}</span>
-                {!liveOn && (
+                {!modeLocked && (
                   <ChevronDown size={12} style={{ transform: modeOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 120ms' }} />
                 )}
               </button>
-              {modeOpen && !liveOn && (
+              {modeOpen && !modeLocked && (
                 <PickerDropdown
                   items={[
                     { key: 'random', label: t('game.modeSelf') },

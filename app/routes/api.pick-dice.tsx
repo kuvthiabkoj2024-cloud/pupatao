@@ -10,6 +10,7 @@ import {
   pickAdversarialDice, getPayoutConfig,
 } from '~/lib/game-logic.server'
 import { signRoundToken } from '~/lib/round-token.server'
+import { SELF_PLAY_ENABLED } from '~/lib/features'
 
 type WalletKey = 'DEMO' | 'REAL' | 'PROMO'
 
@@ -48,6 +49,11 @@ function parseBets(raw: unknown): {
 }
 
 export async function action({ request }: { request: Request }) {
+  // Self-play is globally disabled — live-only mode. Reject roll requests so no
+  // self-play load (even from a stale browser tab) reaches the DB.
+  if (!SELF_PLAY_ENABLED) {
+    return Response.json({ error: 'Self-play is currently disabled.' }, { status: 403 })
+  }
   let raw: unknown
   try { raw = await request.json() } catch {
     return Response.json({ error: 'Invalid JSON body.' }, { status: 400 })

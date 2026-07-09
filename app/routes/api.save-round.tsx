@@ -12,6 +12,7 @@ import {
   getPayoutConfig,
 } from '~/lib/game-logic.server'
 import { verifyRoundToken } from '~/lib/round-token.server'
+import { SELF_PLAY_ENABLED } from '~/lib/features'
 
 type WalletKey = 'DEMO' | 'REAL' | 'PROMO'
 
@@ -25,6 +26,11 @@ interface TokenPayload {
 }
 
 export async function action({ request }: { request: Request }) {
+  // Self-play is globally disabled — live-only mode. Reject persists so no
+  // self-play round can be written even if a stale client got a token.
+  if (!SELF_PLAY_ENABLED) {
+    return Response.json({ error: 'Self-play is currently disabled.' }, { status: 403 })
+  }
   const { getCurrentUser } = await import('~/lib/auth.server')
   let user: Awaited<ReturnType<typeof getCurrentUser>>
   try {

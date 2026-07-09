@@ -40,6 +40,9 @@ export default defineConfig({
         // it would replay a stale "anonymous" page on refresh and silently
         // log the user out from the UI's perspective.
         globPatterns: ["**/*.{js,css,svg,png,jpg,ico,webmanifest}"],
+        // Purge previous builds' precached assets when the SW updates, so old
+        // clients don't cling to dead asset hashes after a redeploy.
+        cleanupOutdatedCaches: true,
         // No navigateFallback — let every navigation hit the network so the
         // SSR payload (user, wallet) is always fresh.
         //
