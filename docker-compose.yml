@@ -1,0 +1,21 @@
+version: "3.8"
+services:
+  pupatao-client:
+    container_name: pupatao-client
+    build:
+      context: .
+    restart: always
+    networks:
+      - pupatao-share-network
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    ports:
+      - "5176:3000"
+    volumes:
+      # Only mount for dev — in prod you don’t want to overwrite built files
+      - ./public:/app/public
+networks:
+  pupatao-share-network:
+    external: true
