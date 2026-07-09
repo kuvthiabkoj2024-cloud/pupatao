@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Form, NavLink, Outlet, useLoaderData, useNavigation, useRevalidator } from 'react-router'
 import { BarChart2, Banknote, Bell, Dices, LayoutDashboard, Loader, LogOut, Radio, ShieldCheck, Trophy, Users, Wallet } from 'lucide-react'
 import { Skeleton } from '~/components/ui/skeleton'
@@ -85,6 +85,17 @@ export default function AdminLayout() {
   const fullName = [admin.firstName, admin.lastName].filter(Boolean).join(' ') || admin.email
   const visibleNav = NAV.filter(item => !item.roles || item.roles.includes(admin.role as AdminRole))
   const revalidator = useRevalidator()
+  // Realtime events (round:resolved, customer:registered) can fire many times a
+  // minute during live play. Each revalidate() re-runs the CURRENT admin page's
+  // loader — which may be heavy (wallet/customers/financial). Coalesce them so
+  // the page data refreshes at most once every 15s instead of storming the DB.
+  const lastRevalidateRef = useRef(0)
+  const throttledRevalidate = useCallback(() => {
+    const now = Date.now()
+    if (now - lastRevalidateRef.current < 15000) return
+    lastRevalidateRef.current = now
+    revalidator.revalidate()
+  }, [revalidator])
   const navigation = useNavigation()
   const isNavigating = navigation.state === 'loading'
   const destPath = navigation.location?.pathname ?? ''
@@ -128,12 +139,12 @@ export default function AdminLayout() {
     setPendingBets(0)
     setOpenLiveRoundId(null)
     // Round just ended → refetch loader so the dashboard reflects the new state.
-    revalidator.revalidate()
+    throttledRevalidate()
   })
 
   usePusherEvent<CustomerRegisteredPayload>(ADMIN_CHANNEL, 'customer:registered', payload => {
     toast.success(t('admin.shell.newCustomerRegistered'), { description: payload.tel })
-    revalidator.revalidate()
+    throttledRevalidate()
   })
 
   const counters = { pendingTx, pendingBets }

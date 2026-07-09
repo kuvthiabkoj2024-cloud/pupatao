@@ -36,10 +36,14 @@ function buildDatabaseUrl(): string | undefined {
   }
 
   // Small pool per instance — serverless handles low concurrency each, but
-  // there are MANY instances, so the product is what matters.
+  // there are MANY instances, so the product is what matters. This cap (not
+  // idle time) is what protects the Atlas connection limit.
   append('maxPoolSize', '3')
-  // Release idle connections fast so idle/scaled-down instances free their slots.
-  append('maxIdleTimeMS', '10000')
+  // Keep a connection alive through normal click-to-click pauses (60s) so warm
+  // instances don't re-do the TLS handshake to Atlas on every navigation —
+  // that re-handshake was a big part of the "sometimes slow" feel. Truly idle
+  // instances still release their (capped) connections.
+  append('maxIdleTimeMS', '60000')
   // Fail fast instead of piling up waiters when the pool is momentarily full.
   append('waitQueueTimeoutMS', '5000')
 
