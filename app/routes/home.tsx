@@ -1347,16 +1347,22 @@ export async function loader({ request }: Route.LoaderArgs) {
     }))
 
   const [selfPlay, live] = await Promise.all([
-    prisma.gameRound.findMany({
-      where: {
-        mode: 'RANDOM',
-        status: 'RESOLVED',
-        bets: { some: { userId: user.id } },
-      },
-      orderBy: { resolvedAt: 'desc' },
-      take: 30,
-      select: { id: true, dice1: true, dice2: true, dice3: true },
-    }),
+    // Self-play history uses an expensive `bets: { some }` relation filter (finds
+    // every round the user ever bet on). With self-play disabled this history is
+    // never shown, so skip the query entirely — it ran on every customer home
+    // load and was hammering the DB for nothing.
+    SELF_PLAY_ENABLED
+      ? prisma.gameRound.findMany({
+          where: {
+            mode: 'RANDOM',
+            status: 'RESOLVED',
+            bets: { some: { userId: user.id } },
+          },
+          orderBy: { resolvedAt: 'desc' },
+          take: 30,
+          select: { id: true, dice1: true, dice2: true, dice3: true },
+        })
+      : Promise.resolve([] as { id: string; dice1: string | null; dice2: string | null; dice3: string | null }[]),
     prisma.gameRound.findMany({
       where: { mode: 'LIVE', status: 'RESOLVED' },
       orderBy: { resolvedAt: 'desc' },

@@ -75,11 +75,14 @@ export async function getCurrentUser(request: Request): Promise<User | null> {
   if (session.user.status !== 'ACTIVE') return null
 
   // Best-effort `lastUsedAt` bump, throttled to once every 5 minutes per session.
-  // Without the throttle, concurrent requests (page load + avatar POST, etc.)
-  // race on the same row and MongoDB returns a WriteConflict; using updateMany
-  // with a `lt` guard means only the first one in a 5-min window matches.
+  // The DB `lt` guard alone isn't enough: a BURST of concurrent requests from the
+  // same session (e.g. a reconnection herd) all read the old timestamp, all fire
+  // the update on the SAME document, and MongoDB returns WriteConflicts that the
+  // driver retries — holding connections and worsening the pileup. The in-memory
+  // guard below collapses that burst to a single DB write per session per window
+  // (per instance), so concurrent requests never collide on the row.
   const STALE_MS = 5 * 60 * 1000
-  if (Date.now() - session.lastUsedAt.getTime() > STALE_MS) {
+  if (Date.now() - session.lastUsedAt.getTime() > STALE_MS && claimSessionTouch(session.id)) {
     prisma.session
       .updateMany({
         where: {
@@ -92,6 +95,23 @@ export async function getCurrentUser(request: Request): Promise<User | null> {
   }
 
   return session.user
+}
+
+// In-memory (per-instance) throttle for the session `lastUsedAt` touch. Returns
+// true at most once per 5 minutes per session id, so concurrent requests from the
+// same session don't all issue the DB write (which caused WriteConflict storms).
+const _sessionTouchAt = new Map<string, number>()
+function claimSessionTouch(id: string): boolean {
+  const now = Date.now()
+  const last = _sessionTouchAt.get(id)
+  if (last && now - last < 5 * 60 * 1000) return false
+  _sessionTouchAt.set(id, now)
+  // Bound memory: occasionally drop entries older than the window.
+  if (_sessionTouchAt.size > 5000) {
+    const cutoff = now - 5 * 60 * 1000
+    for (const [k, t] of _sessionTouchAt) if (t < cutoff) _sessionTouchAt.delete(k)
+  }
+  return true
 }
 
 // Use in protected-route loaders. Throws a redirect to /login if anonymous.

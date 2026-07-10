@@ -28,16 +28,20 @@ services:
     # If the event loop is blocked (e.g. a bcrypt/registration flood), this HTTP
     # probe times out → the container is marked unhealthy → autoheal restarts it.
     # The probe runs as its own node process, so a blocked server still fails it.
+    # Lenient on purpose: restart ONLY on a true hang, never on transient
+    # slowness. Restarting a slow-but-alive replica drops all its connections and
+    # triggers a reconnection "thundering herd" that makes things worse. We give
+    # the probe 10s and require ~6 consecutive failures (~90s) before restarting.
     healthcheck:
       test:
         - CMD
         - node
         - -e
-        - "const http=require('http');const req=http.get('http://localhost:3000/api/warm',r=>process.exit(r.statusCode<500?0:1));req.setTimeout(4000,()=>{req.destroy();process.exit(1)});req.on('error',()=>process.exit(1))"
-      interval: 20s
-      timeout: 6s
-      retries: 3
-      start_period: 40s
+        - "const http=require('http');const req=http.get('http://localhost:3000/api/warm',r=>process.exit(r.statusCode<500?0:1));req.setTimeout(10000,()=>{req.destroy();process.exit(1)});req.on('error',()=>process.exit(1))"
+      interval: 15s
+      timeout: 12s
+      retries: 6
+      start_period: 60s
 
   # Watches all containers and restarts any that go "unhealthy" (plain Docker
   # Compose does NOT auto-restart on unhealthy by itself — this sidecar does).

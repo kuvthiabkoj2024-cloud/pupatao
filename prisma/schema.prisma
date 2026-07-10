@@ -445,6 +445,7 @@ model GameRound {
   transactions Transaction[]
 
   @@index([mode, status])
+  @@index([mode, status, resolvedAt(sort: Desc)]) // customer home: live results history
   @@index([createdAt(sort: Desc)])
   @@index([hostId])
 }
