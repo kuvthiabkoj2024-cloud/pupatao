@@ -57,32 +57,53 @@ export async function loader({ request }: Route.LoaderArgs) {
     }),
   ])
 
+  // The live leaderboard is only shown while a competition is RUNNING. Building
+  // it loaded EVERY user AND aggregated EVERY LOSS transaction (millions of rows
+  // in a dice game) — a ~20s scan that ran on every visit to this page, even
+  // with no competition active. Skip it entirely when inactive, and when active
+  // scope the heavy LOSS aggregate to just the visible top ranks so Mongo can
+  // use an index instead of scanning the whole collection.
   const walletField = competition.type === 'DEMO_LIVE' ? 'DEMO' : 'REAL'
-  const users = await prisma.user.findMany({
-    select: {
-      id: true, tel: true, firstName: true, lastName: true, profile: true, createdAt: true,
-      wallets: { where: { type: walletField }, select: { balance: true } },
-    },
-  })
+  let ranked: Array<{
+    id: string; tel: string; name: string | null; profile: string | null
+    createdAt: string; balance: number; totalBets: number; rank: number
+  }> = []
 
-  const betAggs = await prisma.transaction.groupBy({
-    by: ['userId'],
-    where: { type: 'LOSS' },
-    _sum: { amount: true },
-  })
-  const betsByUser = new Map(betAggs.map(b => [b.userId, b._sum.amount ?? 0]))
+  if (competition.enabled) {
+    const users = await prisma.user.findMany({
+      select: {
+        id: true, tel: true, firstName: true, lastName: true, profile: true, createdAt: true,
+        wallets: { where: { type: walletField }, select: { balance: true } },
+      },
+    })
 
-  const ranked = users
-    .map(u => ({
-      id: u.id, tel: u.tel,
-      name: [u.firstName, u.lastName].filter(Boolean).join(' ') || null,
-      profile: u.profile as string | null,
-      createdAt: u.createdAt.toISOString(),
-      balance: u.wallets[0]?.balance ?? 0,
+    const sorted = users
+      .map(u => ({
+        id: u.id, tel: u.tel,
+        name: [u.firstName, u.lastName].filter(Boolean).join(' ') || null,
+        profile: u.profile as string | null,
+        createdAt: u.createdAt.toISOString(),
+        balance: u.wallets[0]?.balance ?? 0,
+      }))
+      .sort((a, b) => b.balance - a.balance)
+
+    // Only the top ranks are shown; compute the heavy LOSS total for them only.
+    const topIds = sorted.slice(0, 200).map(u => u.id)
+    const betAggs = topIds.length
+      ? await prisma.transaction.groupBy({
+          by: ['userId'],
+          where: { type: 'LOSS', userId: { in: topIds } },
+          _sum: { amount: true },
+        })
+      : []
+    const betsByUser = new Map(betAggs.map(b => [b.userId, b._sum.amount ?? 0]))
+
+    ranked = sorted.map((u, i) => ({
+      ...u,
       totalBets: betsByUser.get(u.id) ?? 0,
+      rank: i + 1,
     }))
-    .sort((a, b) => b.balance - a.balance)
-    .map((u, i) => ({ ...u, rank: i + 1 }))
+  }
 
   return {
     competition, ranked,
