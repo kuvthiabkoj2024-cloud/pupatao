@@ -1,7 +1,5 @@
-version: "3.8"
 services:
   pupatao-client:
-    container_name: pupatao-client
     build:
       context: .
       # Public client vars — baked into the browser bundle at build time so
@@ -12,17 +10,21 @@ services:
         VITE_MESSENGER_GROUP_URL: ${VITE_MESSENGER_GROUP_URL}
         VITE_WHATSAPP_GROUP_URL: ${VITE_WHATSAPP_GROUP_URL}
     restart: always
+    # 2 replicas — one per vCPU (Node is single-threaded, so this actually uses
+    # both cores). nginx load-balances across them. NOTE: no container_name here
+    # — each replica must get its own auto-generated name.
+    deploy:
+      replicas: 2
     networks:
       - pupatao-share-network
     env_file:
       - .env
     environment:
       - DATABASE_URL=${DATABASE_URL}
+    # Each replica is published to a host port from this range (5176, 5177);
+    # the host nginx `upstream` block below load-balances across both.
     ports:
-      - "5176:3000"
-    volumes:
-      # Only mount for dev — in prod you don’t want to overwrite built files
-      - ./public:/app/public
+      - "5176-5177:3000"
 networks:
   pupatao-share-network:
     external: true
