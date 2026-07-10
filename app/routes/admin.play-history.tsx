@@ -66,14 +66,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     : betType === 'HIGH' ? { kind: 'RANGE' as const, range: 'HIGH' as const }
     : {}
 
-  // Pre-fetch IDs to avoid expensive $lookup relation filters on the Bet collection.
-  // Each lookup is on a small collection (Wallet, GameRound, User) with proper indexes,
-  // which is orders of magnitude faster than a full-collection join on 18K+ bets.
+  // `walletType` is now a denormalized, indexed column on Bet, so we filter it
+  // directly instead of loading all ~1,151 wallet ids and doing a huge
+  // `walletId IN (…)` scan (which was taking 100+ seconds and freezing the site).
+  // Mode / phone-search filters still pre-fetch ids from their small collections.
   const { getSleepMode } = await import('~/lib/system-settings.server')
-  const [walletIds, roundIds, userIds, sleepMode] = await Promise.all([
-    // All wallets of the selected type — replaces wallet: { is: { type } }
-    prisma.wallet.findMany({ where: { type: walletType }, select: { id: true } })
-      .then(ws => ws.map(w => w.id)),
+  const [roundIds, userIds, sleepMode] = await Promise.all([
     // Round IDs by mode — only when mode filter is active
     mode !== 'ALL'
       ? prisma.gameRound.findMany({ where: { mode: mode as 'RANDOM' | 'LIVE' }, select: { id: true } })
@@ -88,7 +86,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   ])
 
   const where = {
-    walletId: { in: walletIds },
+    walletType,
     ...(result !== 'ALL' ? { result } : {}),
     ...betTypeWhere,
     ...(roundIds !== null ? { roundId: { in: roundIds } } : {}),

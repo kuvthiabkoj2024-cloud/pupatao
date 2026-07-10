@@ -480,6 +480,12 @@ model Bet {
   roundId  String  @db.ObjectId
   userId   String  @db.ObjectId
   walletId String  @db.ObjectId
+  // Denormalized copy of the source wallet's type (REAL/DEMO/PROMO). Lets the
+  // admin play-history filter by wallet type with ONE indexed lookup instead of
+  // loading all ~1,151 wallet ids and doing a huge `walletId IN (…)` scan (which
+  // was taking 100+ seconds). Nullable so historical rows are valid until the
+  // one-time backfill runs.
+  walletType WalletType?
   kind     BetKind
 
   amount Int // stake (already debited from wallet when placed)
@@ -514,6 +520,7 @@ model Bet {
   @@index([userId, walletId, createdAt(sort: Desc)]) // /history filter: real wallet only
   @@index([walletId, createdAt(sort: Desc)])          // admin play-history: wallet filter + sort
   @@index([createdAt(sort: Desc)])                    // dashboard: bets-in-last-24h count
+  @@index([walletType, createdAt(sort: Desc)])        // admin play-history: fast wallet-type filter
 }
 
 enum BetKind {

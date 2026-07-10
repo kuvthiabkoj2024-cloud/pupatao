@@ -282,7 +282,7 @@ async function handleRandomRound(args: {
       const result: BetResult = payout > 0 ? 'WIN' : 'LOSS'
       betWrites.push(db.bet.create({
         data: {
-          roundId: round.id, userId: user.id, walletId: wallet.id,
+          roundId: round.id, userId: user.id, walletId: wallet.id, walletType: walletKey,
           kind: 'SYMBOL', amount: b.amount, payout, result,
           symbol: b.symbol, cell: b.cell, resolvedAt: new Date(),
         },
@@ -293,7 +293,7 @@ async function handleRandomRound(args: {
       const result: BetResult = payout > 0 ? 'WIN' : 'LOSS'
       betWrites.push(db.bet.create({
         data: {
-          roundId: round.id, userId: user.id, walletId: wallet.id,
+          roundId: round.id, userId: user.id, walletId: wallet.id, walletType: walletKey,
           kind: 'RANGE', amount: b.amount, payout, result,
           range: b.range, resolvedAt: new Date(),
         },
@@ -304,7 +304,7 @@ async function handleRandomRound(args: {
       const result: BetResult = payout > 0 ? 'WIN' : 'LOSS'
       betWrites.push(db.bet.create({
         data: {
-          roundId: round.id, userId: user.id, walletId: wallet.id,
+          roundId: round.id, userId: user.id, walletId: wallet.id, walletType: walletKey,
           kind: 'PAIR', amount: b.amount, payout, result,
           pairA: b.symbolA, pairB: b.symbolB, cellA: b.cellA, cellB: b.cellB,
           resolvedAt: new Date(),
@@ -515,16 +515,16 @@ async function handleLiveBets(args: {
       // Create all bets in parallel — reduces DB round trips from N sequential to 1 parallel batch.
       await Promise.all([
         ...symbolBets.map(b => db.bet.create({
-          data: { roundId: openRound.id, userId: user.id, walletId: wallet.id, kind: 'SYMBOL', amount: b.amount, symbol: b.symbol, cell: b.cell },
+          data: { roundId: openRound.id, userId: user.id, walletId: wallet.id, walletType: args.walletKey, kind: 'SYMBOL', amount: b.amount, symbol: b.symbol, cell: b.cell },
         })),
         ...rangeBets.map(b => db.bet.create({
-          data: { roundId: openRound.id, userId: user.id, walletId: wallet.id, kind: 'RANGE', amount: b.amount, range: b.range },
+          data: { roundId: openRound.id, userId: user.id, walletId: wallet.id, walletType: args.walletKey, kind: 'RANGE', amount: b.amount, range: b.range },
         })),
         ...pairBets.map(b => db.bet.create({
-          data: { roundId: openRound.id, userId: user.id, walletId: wallet.id, kind: 'PAIR', amount: b.amount, pairA: b.symbolA, pairB: b.symbolB, cellA: b.cellA, cellB: b.cellB },
+          data: { roundId: openRound.id, userId: user.id, walletId: wallet.id, walletType: args.walletKey, kind: 'PAIR', amount: b.amount, pairA: b.symbolA, pairB: b.symbolB, cellA: b.cellA, cellB: b.cellB },
         })),
         ...sumBets.map(b => db.bet.create({
-          data: { roundId: openRound.id, userId: user.id, walletId: wallet.id, kind: 'SUM', amount: b.amount, exactSum: b.sum },
+          data: { roundId: openRound.id, userId: user.id, walletId: wallet.id, walletType: args.walletKey, kind: 'SUM', amount: b.amount, exactSum: b.sum },
         })),
       ])
 

@@ -111,7 +111,7 @@ export async function action({ request }: { request: Request }) {
       symbolBets.forEach((b, i) => {
         const payout = symbolPayouts[i]
         writes.push(db.bet.create({ data: {
-          roundId: round.id, userId: user!.id, walletId: wallet.id,
+          roundId: round.id, userId: user!.id, walletId: wallet.id, walletType: walletKey,
           kind: 'SYMBOL', amount: b.amount, payout, result: (payout > 0 ? 'WIN' : 'LOSS') as BetResult,
           symbol: b.symbol, cell: b.cell, resolvedAt: new Date(),
         }}))
@@ -119,7 +119,7 @@ export async function action({ request }: { request: Request }) {
       rangeBets.forEach((b, i) => {
         const payout = rangePayouts[i]
         writes.push(db.bet.create({ data: {
-          roundId: round.id, userId: user!.id, walletId: wallet.id,
+          roundId: round.id, userId: user!.id, walletId: wallet.id, walletType: walletKey,
           kind: 'RANGE', amount: b.amount, payout, result: (payout > 0 ? 'WIN' : 'LOSS') as BetResult,
           range: b.range, resolvedAt: new Date(),
         }}))
@@ -127,7 +127,7 @@ export async function action({ request }: { request: Request }) {
       pairBets.forEach((b, i) => {
         const payout = pairPayouts[i]
         writes.push(db.bet.create({ data: {
-          roundId: round.id, userId: user!.id, walletId: wallet.id,
+          roundId: round.id, userId: user!.id, walletId: wallet.id, walletType: walletKey,
           kind: 'PAIR', amount: b.amount, payout, result: (payout > 0 ? 'WIN' : 'LOSS') as BetResult,
           pairA: b.symbolA, pairB: b.symbolB, cellA: b.cellA, cellB: b.cellB, resolvedAt: new Date(),
         }}))
