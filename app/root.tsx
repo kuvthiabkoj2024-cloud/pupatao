@@ -6,6 +6,7 @@ import {
   Scripts,
   ScrollRestoration,
   useRouteLoaderData,
+  type ShouldRevalidateFunctionArgs,
 } from "react-router"
 import { Toaster } from "sonner"
 import { Trophy, X } from "lucide-react"
@@ -89,6 +90,23 @@ export async function loader({ request }: Route.LoaderArgs) {
     competitionEnabled: competition.enabled,    // for banner (only show while running)
     competitionMenuVisible: competition.menuVisible, // for menu item visibility
   }
+}
+
+// During live play the client calls revalidator.revalidate() constantly (on
+// every Pusher event) to keep child routes fresh. Each of those re-ran THIS
+// root loader too — re-fetching /_root.data hundreds of times (the flood in the
+// logs). But the root data (session + wallets) doesn't change on those events:
+// the on-screen balance is driven by the in-browser user-store (updated
+// optimistically + via Pusher), not this loader. So skip re-running the root
+// loader for same-URL programmatic revalidations; still revalidate on real
+// navigations and on form submissions/actions.
+export function shouldRevalidate({
+  currentUrl, nextUrl, formMethod, defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  const sameUrl =
+    currentUrl.pathname === nextUrl.pathname && currentUrl.search === nextUrl.search
+  if (!formMethod && sameUrl) return false
+  return defaultShouldRevalidate
 }
 
 export const links: Route.LinksFunction = () => [
