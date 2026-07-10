@@ -1886,13 +1886,17 @@ export default function FishPrawnCrabGame() {
   // Pause BGM when the PWA goes to background, resume on return.
   useEffect(() => { attachBgMusicVisibilityGuard() }, [])
 
-  // Warm the serverless function ONCE on load. The old every-60s ping was pure
-  // overhead (dozens of requests/user/hour) — active gameplay keeps the function
-  // warm anyway, and an occasional cold start is cheaper than the request flood.
+  // Warm the serverless function ONCE per login. Depend on authUser?.id (a
+  // stable primitive) — NOT the authUser object, whose reference changes on
+  // every data revalidation and was causing this ping to re-fire on every
+  // refresh (a request flood amplified by realtime revalidations).
+  const warmedRef = useRef(false)
   useEffect(() => {
-    if (!authUser) return
+    if (!authUser?.id || warmedRef.current) return
+    warmedRef.current = true
     fetch('/api/warm').catch(() => { })
-  }, [authUser])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser?.id])
 
   // Pre-compute adversarial dice in the background whenever the bet layout
   // changes so the result is ready the instant the player clicks Roll.

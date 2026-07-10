@@ -401,24 +401,6 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
         style={{ background: "#4338ca", color: "#fff", border: "1px solid #818cf8" }}>
         ລອງອີກຄັ້ງ · Try again
       </button>
-      {/* TEMPORARY diagnostic: shows the real error so we can see what's throwing
-          (mobile has no DevTools console). Remove once the bug is found. */}
-      <pre style={{
-        marginTop: 24, maxWidth: "90vw", maxHeight: "40vh", overflow: "auto",
-        whiteSpace: "pre-wrap", wordBreak: "break-word", textAlign: "left",
-        fontSize: 11, lineHeight: 1.4, color: "#fca5a5",
-        background: "rgba(0,0,0,0.35)", border: "1px solid #4338ca",
-        borderRadius: 8, padding: 12,
-      }}>
-        {(() => {
-          if (isRouteError) {
-            const e = error as { status?: number; statusText?: string; data?: unknown }
-            return `HTTP ${e.status ?? ""} ${e.statusText ?? ""}\n${typeof e.data === "string" ? e.data : JSON.stringify(e.data)}`
-          }
-          if (error instanceof Error) return `${error.name}: ${error.message}\n\n${error.stack ?? ""}`
-          return String(error)
-        })()}
-      </pre>
     </main>
   )
 }
