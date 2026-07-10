@@ -25,6 +25,32 @@ services:
     # the host nginx `upstream` block below load-balances across both.
     ports:
       - "5176-5177:3000"
+    # If the event loop is blocked (e.g. a bcrypt/registration flood), this HTTP
+    # probe times out → the container is marked unhealthy → autoheal restarts it.
+    # The probe runs as its own node process, so a blocked server still fails it.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const http=require('http');const req=http.get('http://localhost:3000/api/warm',r=>process.exit(r.statusCode<500?0:1));req.setTimeout(4000,()=>{req.destroy();process.exit(1)});req.on('error',()=>process.exit(1))"
+      interval: 20s
+      timeout: 6s
+      retries: 3
+      start_period: 40s
+
+  # Watches all containers and restarts any that go "unhealthy" (plain Docker
+  # Compose does NOT auto-restart on unhealthy by itself — this sidecar does).
+  autoheal:
+    image: willfarrell/autoheal
+    restart: always
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: all
+      AUTOHEAL_INTERVAL: 10
+      AUTOHEAL_START_PERIOD: 30
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
 networks:
   pupatao-share-network:
     external: true
