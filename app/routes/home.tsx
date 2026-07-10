@@ -1270,6 +1270,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { getPayoutConfig } = await import('~/lib/payouts.server')
   const payoutConfig = getPayoutConfig()
 
+  // Everything below touches the DB. Wrap it so a transient DB hiccup renders a
+  // safe (empty) page instead of throwing the customer to the "site is busy"
+  // error screen — the game shell loads and realtime fills it in.
+  try {
   // The currently in-flight LIVE round (if any), plus the admin-controlled
   // stream URL and next schedule from SystemSetting. The stream URL is set
   // when admin starts a round and cleared when admin clicks "End Live".
@@ -1390,6 +1394,24 @@ export async function loader({ request }: Route.LoaderArgs) {
     payoutConfig,
     hasSeenTour: user.hasSeenTour,
     betLocked: user.betLocked,
+  }
+  } catch (err) {
+    console.error('[home loader] failed — rendering safe fallback:', err)
+    return {
+      selfPlayHistory: [] as SymbolKey[][],
+      liveHistory: [] as SymbolKey[][],
+      liveRound: null,
+      liveStreamUrl: null,
+      schedule: { start: null as string | null, end: null as string | null, notice: null as string | null },
+      competitionEnabled: false,
+      competitionMenuVisible: false,
+      competitionType: 'DEMO_LIVE' as const,
+      isCompetitionParticipant: false,
+      myLiveBets: [] as MyLiveBet[],
+      payoutConfig,
+      hasSeenTour: true,
+      betLocked: false,
+    }
   }
 }
 
