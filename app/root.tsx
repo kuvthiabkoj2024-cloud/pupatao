@@ -295,10 +295,24 @@ function PWAInstallPrompt() {
   }
 
   async function installAndroid() {
-    if (!deferredPrompt) return
-    deferredPrompt.prompt()
-    const { outcome } = await deferredPrompt.userChoice
+    // Prefer the state copy, but fall back to the event captured globally in
+    // entry.client.tsx (in case the effect's setState hasn't propagated).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dp = deferredPrompt ?? (typeof window !== 'undefined' ? (window as any).__pwaInstallPrompt : null)
+    if (!dp || typeof dp.prompt !== 'function') {
+      // No installable prompt available (e.g. an in-app browser / webview that
+      // doesn't support beforeinstallprompt). Just close the card.
+      dismiss()
+      return
+    }
+    try {
+      // prompt() MUST be called synchronously inside this click gesture.
+      dp.prompt()
+      await dp.userChoice
+    } catch { /* prompt already consumed or unsupported — ignore */ }
     setDeferredPrompt(null)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    try { (window as any).__pwaInstallPrompt = null } catch { /* ignore */ }
     setShow(false)
     // Whether accepted or not, suppress for this session
     try { sessionStorage.setItem('pwa_prompt_dismissed', '1') } catch { /* ignore */ }

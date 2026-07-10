@@ -2817,7 +2817,8 @@ export default function FishPrawnCrabGame() {
               )}
             </div>
 
-            {/* Center: mode selector — uses its own state to avoid conflicting with the main header */}
+            {/* Center: mode selector — hidden when self-play is disabled (live only) */}
+            {SELF_PLAY_ENABLED && (
             <div className="relative z-10">
               <button
                 onClick={() => { if (modeLocked) return; playClick(); setOverlayModeOpen(v => !v) }}
@@ -2836,6 +2837,7 @@ export default function FishPrawnCrabGame() {
                 />
               )}
             </div>
+            )}
 
             {/* Right: wallet + balance */}
             <div className="relative z-10 flex items-center gap-1.5 shrink-0">
@@ -2870,6 +2872,28 @@ export default function FishPrawnCrabGame() {
                 />
               )}
               <a href="/wallet" className="text-sm font-bold text-white">{formatAmount(balance)}</a>
+              {user.activeWallet === 'demo' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEnabled && playCoin()
+                    ensureBgMusic()
+                    setCurrentBets([]); setCurrentRangeBets([]); setCurrentPairBets([]); setCurrentSumBets([]); setPendingCell(null)
+                    if (authUser) {
+                      resetDemoFetcher.submit(null, { method: 'post', action: '/api/reset-demo' })
+                    } else {
+                      resetDemoBalance(); setBalance(DEMO_RESET_AMOUNT)
+                    }
+                  }}
+                  disabled={resetDemoFetcher.state !== 'idle'}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-90 disabled:opacity-60"
+                  style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', color: '#fff', border: '1px dashed #4ade80' }}
+                  title={`Reset demo balance to ${DEMO_RESET_AMOUNT.toLocaleString()} ₭`}
+                  aria-label="Refresh demo balance"
+                >
+                  <RefreshCw size={11} className={resetDemoFetcher.state !== 'idle' ? 'animate-spin' : ''} />
+                </button>
+              )}
             </div>
           </div>
 
@@ -3414,8 +3438,9 @@ export default function FishPrawnCrabGame() {
               ?
             </button>
 
-            {/* Mode dropdown — Self-play / Live, with the same accent colors
-                the old toggle button used. */}
+            {/* Mode dropdown — Self-play / Live. Hidden when self-play is
+                disabled (the game is live-only, so there's nothing to switch). */}
+            {SELF_PLAY_ENABLED && (
             <div className="relative">
               <button
                 data-tour="mode-switcher"
@@ -3451,6 +3476,7 @@ export default function FishPrawnCrabGame() {
                 />
               )}
             </div>
+            )}
             <button
               onClick={() => { playClick(); ensureBgMusic() }}
               className="hidden md:inline-flex rounded-full px-4 py-1.5 text-xs font-bold"
