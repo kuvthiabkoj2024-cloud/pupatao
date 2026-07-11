@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useFetcher, useLoaderData } from 'react-router'
-import { Bell, Loader, Play, Pause, Trash2, Send, CalendarClock, Repeat, Users as UsersIcon, Megaphone } from 'lucide-react'
+import { Bell, Loader, Play, Pause, Trash2, Send, CalendarClock, Repeat, Users as UsersIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import type { NotificationAudience } from '@prisma/client'
 import type { Route } from './+types/admin.notifications'
@@ -14,16 +14,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireRole(request, ['ADMIN', 'SUPERADMIN'])
   const locale = parseLocaleCookie(request.headers.get('cookie'))
 
-  const { getAnnouncement } = await import('~/lib/system-settings.server')
-  const [campaigns, subscriberCount, announcement] = await Promise.all([
+  const [campaigns, subscriberCount] = await Promise.all([
     prisma.notificationCampaign.findMany({ orderBy: { createdAt: 'desc' }, take: 50 }),
     prisma.pushSubscription.count(),
-    getAnnouncement(),
   ])
 
   return {
     subscriberCount,
-    announcement,
     // Localized audience options for the <select> (server-side so we never
     // import the .server label map into the client bundle).
     audiences: AUDIENCE_VALUES.map(v => ({ value: v, label: AUDIENCE_LABELS[v][locale] })),
@@ -77,12 +74,21 @@ export async function action({ request }: Route.ActionArgs) {
         return { ok: true, created: true }
       }
 
-      // schedule === 'now' → create + fire immediately.
+      // schedule === 'now' → create + fire immediately (push) AND show it as a
+      // persistent in-app announcement (the bell) for every user.
       const c = await prisma.notificationCampaign.create({
         data: { title, message, audience, mode: 'ONCE', active: false, createdById: admin.id },
       })
       const { runCampaign } = await import('~/lib/notifications.server')
       const res = await runCampaign(c)
+
+      // Refresh the in-app notification feed for every user (the bell) and
+      // signal all connected clients to refetch it immediately.
+      const { invalidateNotifications } = await import('~/lib/system-settings.server')
+      const { notifyGame } = await import('~/lib/pusher.server')
+      invalidateNotifications()
+      notifyGame('announcement:posted', { id: c.id, message, createdAt: new Date().toISOString() })
+
       return { ok: true, sent: res.sent }
     }
 
@@ -106,20 +112,12 @@ export async function action({ request }: Route.ActionArgs) {
     if (op === 'delete') {
       const id = String(fd.get('id') ?? '')
       await prisma.notificationCampaign.delete({ where: { id } }).catch(() => { /* already gone */ })
-      return { ok: true }
-    }
-
-    // Persistent in-app announcement banner — shown to EVERY customer until
-    // cleared. Post/replace, or clear (empty message).
-    if (op === 'postAnnouncement' || op === 'clearAnnouncement') {
-      const message = op === 'clearAnnouncement' ? null : String(fd.get('message') ?? '').trim()
-      if (op === 'postAnnouncement' && !message) return { error: 'Message is required' }
-      const { setAnnouncement } = await import('~/lib/system-settings.server')
+      // Drop it from the user notification feed too.
+      const { invalidateNotifications } = await import('~/lib/system-settings.server')
       const { notifyGame } = await import('~/lib/pusher.server')
-      const announcement = await setAnnouncement(message, admin.id)
-      // Broadcast to every connected customer so it appears instantly.
-      notifyGame('announcement:posted', announcement ?? { id: 'cleared', message: null, createdAt: new Date().toISOString() })
-      return { ok: true, announced: op === 'postAnnouncement' }
+      invalidateNotifications()
+      notifyGame('announcement:posted', { id, message: '', createdAt: new Date().toISOString() })
+      return { ok: true }
     }
 
     return { error: 'Unknown action' }
@@ -133,7 +131,7 @@ const PARAMS = ['phone_number', 'first_name', 'last_name', 'name'] as const
 
 export default function AdminNotifications() {
   const t = useT()
-  const { subscriberCount, audiences, campaigns, announcement } = useLoaderData<typeof loader>()
+  const { subscriberCount, audiences, campaigns } = useLoaderData<typeof loader>()
   const fetcher = useFetcher<{ ok?: boolean; sent?: number; created?: boolean; error?: string }>()
   const busy = fetcher.state !== 'idle'
 
@@ -192,8 +190,6 @@ export default function AdminNotifications() {
           <UsersIcon size={13} /> {subscriberCount} <span className="opacity-70">{t('admin.notifications.subscribers')}</span>
         </div>
       </div>
-
-      <AnnouncementCard announcement={announcement} />
 
       <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
         {/* ── Composer ── */}
@@ -274,69 +270,6 @@ export default function AdminNotifications() {
             campaigns.map(c => <CampaignRow key={c.id} c={c} />)
           )}
         </div>
-      </div>
-    </div>
-  )
-}
-
-// Persistent in-app announcement banner control. Posts a message that shows on
-// every customer's screen (via a Pusher broadcast + the home loader) until cleared.
-function AnnouncementCard({ announcement }: { announcement: { id: string; message: string; createdAt: string } | null }) {
-  const fetcher = useFetcher<{ ok?: boolean; announced?: boolean; error?: string }>()
-  const [text, setText] = useState(announcement?.message ?? '')
-  const busy = fetcher.state !== 'idle'
-
-  useEffect(() => {
-    if (fetcher.state !== 'idle') return
-    if (fetcher.data?.ok) toast.success(fetcher.data.announced ? 'ປະກາດແລ້ວ · Posted to everyone' : 'ລຶບແລ້ວ · Cleared')
-    else if (fetcher.data?.error) toast.error(fetcher.data.error)
-  }, [fetcher.state, fetcher.data])
-
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl p-4" style={{ background: '#0f172a', border: '1px solid #1e1b4b' }}>
-      <div className="flex items-center gap-2">
-        <Megaphone size={16} color="#fcd34d" />
-        <span className="text-sm font-bold text-white">ປະກາດຫາທຸກຄົນ · In-app announcement</span>
-        {announcement && (
-          <span className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: 'rgba(74,222,128,0.15)', color: '#4ade80' }}>
-            ● ກຳລັງສະແດງ · Live
-          </span>
-        )}
-      </div>
-      <p className="text-xs" style={{ color: '#a5b4fc' }}>
-        ຂໍ້ຄວາມນີ້ຈະສະແດງເປັນແຖບຢູ່ໜ້າຈໍຂອງທຸກຄົນຈົນກວ່າຈະລຶບ. · Shown as a banner on every customer&apos;s screen until you clear it.
-      </p>
-      <textarea
-        value={text}
-        onChange={e => setText(e.target.value)}
-        rows={2}
-        maxLength={300}
-        placeholder="ພິມຂໍ້ຄວາມປະກາດ…"
-        className="w-full resize-none rounded-lg px-3 py-2 text-sm outline-none"
-        style={{ background: '#0f172a', color: '#fde68a', border: '1.5px solid #4338ca' }}
-      />
-      <div className="flex gap-2">
-        <button
-          type="button"
-          disabled={busy || !text.trim()}
-          onClick={() => fetcher.submit({ op: 'postAnnouncement', message: text.trim() }, { method: 'post' })}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-bold disabled:opacity-50"
-          style={{ background: 'linear-gradient(135deg,#7c3aed,#4c1d95)', color: '#fff', border: '1px solid #a78bfa' }}
-        >
-          {busy ? <Loader size={14} className="animate-spin" /> : <Megaphone size={14} />}
-          {announcement ? 'ອັບເດດ · Update' : 'ສົ່ງ · Post'}
-        </button>
-        {announcement && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => { setText(''); fetcher.submit({ op: 'clearAnnouncement' }, { method: 'post' }) }}
-            className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
-            style={{ background: '#1e1b4b', color: '#f87171', border: '1px solid #7f1d1d' }}
-          >
-            <Trash2 size={14} /> ລຶບ · Clear
-          </button>
-        )}
       </div>
     </div>
   )

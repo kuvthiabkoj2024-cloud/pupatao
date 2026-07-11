@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef, memo, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import confetti from 'canvas-confetti'
 import { Form, Link, useFetcher, useLoaderData, useNavigate, useOutletContext, useRevalidator, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
@@ -1198,71 +1199,93 @@ interface PickerDropdownProps {
 // the red dot appears when there's an unread announcement, and tapping opens a
 // popover with the full text (or an empty state).
 function AnnouncementBell({
-  message, hasUnread, onDismiss,
+  notifications, hasUnread, onSeen,
 }: {
-  message: string | null
+  notifications: { id: string; title: string | null; message: string; createdAt: string }[]
   hasUnread: boolean
-  onDismiss: () => void
+  onSeen: () => void
 }) {
   const [open, setOpen] = useState(false)
+  const openList = () => { setOpen(true); onSeen() }
   return (
     <div className="relative z-20">
       <button
         type="button"
-        onClick={() => setOpen(v => !v)}
+        onClick={openList}
         className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
         style={{ background: 'linear-gradient(135deg,#7c3aed,#4c1d95)', border: '1px solid #a78bfa', color: '#fde68a' }}
-        aria-label="Announcement"
+        aria-label="Notifications"
       >
         <BellRing size={13} />
         {hasUnread && (
           <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full" style={{ background: '#f87171', border: '1.5px solid #1e0040' }} />
         )}
       </button>
-      {/* Tap the bell → full-detail modal (centered, readable on mobile). */}
-      {open && (
+      {/* Tap the bell → bottom sheet with the full list. Portaled to <body> so
+          it renders on the TOP layer, above the live overlay and everything. */}
+      {open && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-[300] flex items-center justify-center p-4"
+          className="fixed inset-0 z-[1000] flex items-end justify-center"
           style={{ background: 'rgba(0,0,0,0.72)' }}
           onClick={() => setOpen(false)}
           role="dialog"
           aria-modal="true"
         >
+          <style>{`@keyframes annSheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}`}</style>
           <div
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-sm rounded-2xl p-5 shadow-2xl"
-            style={{ background: 'linear-gradient(135deg,#2d1b4e,#1e0040)', border: '1px solid #a78bfa' }}
+            className="flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl shadow-2xl"
+            style={{
+              background: 'linear-gradient(135deg,#2d1b4e,#1e0040)',
+              borderTop: '1px solid #a78bfa',
+              animation: 'annSheetUp 0.28s cubic-bezier(0.22,1,0.36,1)',
+              paddingBottom: 'env(safe-area-inset-bottom)',
+            }}
           >
-            <div className="mb-3 flex items-center gap-2">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full" style={{ background: 'rgba(124,58,237,0.35)' }}>
-                <BellRing size={18} style={{ color: '#fcd34d' }} />
+            {/* Grab handle */}
+            <div className="mx-auto mt-2 h-1 w-10 rounded-full" style={{ background: 'rgba(167,139,250,0.4)' }} />
+            <div className="flex items-center gap-2 px-4 py-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: 'rgba(124,58,237,0.35)' }}>
+                <BellRing size={16} style={{ color: '#fcd34d' }} />
               </div>
-              <span className="text-sm font-bold" style={{ color: '#fde68a' }}>ປະກາດ · Announcement</span>
+              <span className="text-sm font-bold" style={{ color: '#fde68a' }}>ການແຈ້ງເຕືອນ · Notifications</span>
               <button type="button" onClick={() => setOpen(false)} className="ml-auto flex h-7 w-7 items-center justify-center rounded-full"
                 style={{ background: 'rgba(255,255,255,0.08)', color: '#a78bfa' }} aria-label="Close">
                 <X size={16} />
               </button>
             </div>
-            {message ? (
-              <p className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: '#e9d5ff' }}>{message}</p>
-            ) : (
-              <p className="text-sm" style={{ color: '#a78bfa' }}>ບໍ່ມີການແຈ້ງເຕືອນ · No announcements</p>
-            )}
-            {message && (
-              <button
-                type="button"
-                onClick={() => { onDismiss(); setOpen(false) }}
-                className="mt-5 w-full rounded-xl py-2.5 text-sm font-bold"
-                style={{ background: 'linear-gradient(135deg,#7c3aed,#4c1d95)', color: '#fff', border: '1px solid #a78bfa' }}
-              >
-                ຮັບຊາບ · Got it
-              </button>
-            )}
+            <div className="flex-1 overflow-y-auto px-3 pb-4">
+              {notifications.length === 0 ? (
+                <p className="px-1 py-6 text-center text-sm" style={{ color: '#a78bfa' }}>ບໍ່ມີການແຈ້ງເຕືອນ · No notifications</p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {notifications.map(n => (
+                    <li key={n.id} className="rounded-xl p-3" style={{ background: 'rgba(124,58,237,0.14)', border: '1px solid rgba(167,139,250,0.25)' }}>
+                      {n.title && <div className="mb-0.5 text-xs font-bold" style={{ color: '#fde68a' }}>{n.title}</div>}
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: '#e9d5ff' }}>{n.message}</p>
+                      <div className="mt-1.5 text-[10px]" style={{ color: '#8b7fb8' }}>{formatNotifTime(n.createdAt)}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
+}
+
+// Compact relative time for the notification list (e.g. "5 ນາທີກ່ອນ").
+function formatNotifTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return 'ຫາກໍ່ · just now'
+  if (min < 60) return `${min} ນາທີກ່ອນ`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr} ຊົ່ວໂມງກ່ອນ`
+  return new Date(iso).toLocaleDateString()
 }
 
 function PickerDropdown({ items, active, onSelect, onClose, align = 'left' }: PickerDropdownProps) {
@@ -1329,6 +1352,20 @@ type MyLiveBet = {
 // Also returns the currently-open LIVE round (if any) so the LIVE-mode UI
 // shows the admin's stream + a server-driven betting countdown rather than
 // a hardcoded placeholder + local timer.
+// Fills the admin's message placeholders with the viewer's own data for the
+// in-app notification bell. Anonymous viewers get empty strings.
+function fillNotificationTemplate(
+  msg: string,
+  u: { tel: string; firstName: string | null; lastName: string | null } | null,
+): string {
+  const name = u ? [u.firstName, u.lastName].filter(Boolean).join(' ') : ''
+  return msg
+    .replace(/\{\{\s*phone_number\s*\}\}/g, u?.tel ?? '')
+    .replace(/\{\{\s*first_name\s*\}\}/g, u?.firstName ?? '')
+    .replace(/\{\{\s*last_name\s*\}\}/g, u?.lastName ?? '')
+    .replace(/\{\{\s*name\s*\}\}/g, name)
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   const { getCurrentUser } = await import('~/lib/auth.server')
   let user: Awaited<ReturnType<typeof getCurrentUser>> = null
@@ -1349,8 +1386,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   // The currently in-flight LIVE round (if any), plus the admin-controlled
   // stream URL and next schedule from SystemSetting. The stream URL is set
   // when admin starts a round and cleared when admin clicks "End Live".
-  const { getLiveStreamUrl, getLiveSchedule, getCompetitionConfig, getAnnouncement } = await import('~/lib/system-settings.server')
-  const [liveRoundRaw, liveStreamUrl, schedule, competitionCfg, announcement] = await Promise.all([
+  const { getLiveStreamUrl, getLiveSchedule, getCompetitionConfig, getRecentNotifications } = await import('~/lib/system-settings.server')
+  const [liveRoundRaw, liveStreamUrl, schedule, competitionCfg, notificationsRaw] = await Promise.all([
     prisma.gameRound.findFirst({
       where: { mode: 'LIVE', status: { in: ['BETTING', 'LOCKED', 'AWAITING_RESULT'] } },
       orderBy: { createdAt: 'desc' },
@@ -1359,8 +1396,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     getLiveStreamUrl(),
     getLiveSchedule(),
     getCompetitionConfig(),
-    getAnnouncement(),
+    getRecentNotifications(),
   ])
+  // Fill {{phone_number}}/{{first_name}}/{{last_name}}/{{name}} with this user's
+  // data (empty for anonymous) so the bell shows a personalized, readable message.
+  const notifications = notificationsRaw.map(n => ({
+    id: n.id, title: n.title, createdAt: n.createdAt,
+    message: fillNotificationTemplate(n.message, user),
+  }))
   const liveRound = liveRoundRaw
     ? {
       id: liveRoundRaw.id,
@@ -1379,7 +1422,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     return {
       selfPlayHistory: [] as SymbolKey[][],
       liveHistory: [] as SymbolKey[][],
-      liveRound, liveStreamUrl, schedule, announcement,
+      liveRound, liveStreamUrl, schedule, notifications,
       competitionEnabled: competitionCfg.enabled,
       competitionMenuVisible: competitionCfg.menuVisible,
       competitionType: competitionCfg.type,
@@ -1457,7 +1500,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     liveRound,
     liveStreamUrl,
     schedule,
-    announcement,
+    notifications,
     competitionEnabled: competitionCfg.enabled,
     competitionMenuVisible: competitionCfg.menuVisible,
     competitionType: competitionCfg.type,
@@ -1477,7 +1520,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       liveRound: null,
       liveStreamUrl: null,
       schedule: { start: null as string | null, end: null as string | null, notice: null as string | null },
-      announcement: null as { id: string; message: string; createdAt: string } | null,
+      notifications: [] as { id: string; title: string | null; message: string; createdAt: string }[],
       competitionEnabled: false,
       competitionMenuVisible: false,
       competitionType: 'DEMO_LIVE' as const,
@@ -1675,25 +1718,24 @@ export default function FishPrawnCrabGame() {
     setLiveMirror(null)
   })
 
-  // ── Admin announcement banner ───────────────────────────────────────────
-  // A persistent message the admin posts to everyone. Seeded from the loader,
-  // updated live via the public game channel. Dismissal is tracked by id in
-  // localStorage so a dismissed one stays hidden, but a NEW post re-appears.
-  const [announcement, setAnnouncement] = useState(loaderData.announcement)
-  useEffect(() => { setAnnouncement(loaderData.announcement) }, [loaderData.announcement?.id])
-  const [dismissedAnnId, setDismissedAnnId] = useState<string | null>(null)
+  // ── Admin notification feed (bell) ───────────────────────────────────────
+  // The bell shows EVERY recent notification the admin has sent (from the
+  // loader). A newly-sent one triggers a refetch via the public game channel.
+  // The red dot shows until the newest notification has been opened (tracked by
+  // id in localStorage).
+  const notifications = loaderData.notifications
+  const [seenNotifId, setSeenNotifId] = useState<string | null>(null)
   useEffect(() => {
-    try { setDismissedAnnId(localStorage.getItem('fpc_ann_dismissed')) } catch { /* ignore */ }
+    try { setSeenNotifId(localStorage.getItem('fpc_notif_seen')) } catch { /* ignore */ }
   }, [])
-  usePusherEvent<AnnouncementPayload>(GAME_CHANNEL, 'announcement:posted', payload => {
-    setAnnouncement(payload.message ? { id: payload.id, message: payload.message, createdAt: payload.createdAt } : null)
-  })
-  const dismissAnnouncement = useCallback(() => {
-    if (!announcement) return
-    try { localStorage.setItem('fpc_ann_dismissed', announcement.id) } catch { /* ignore */ }
-    setDismissedAnnId(announcement.id)
-  }, [announcement])
-  const showAnnouncement = !!announcement && announcement.id !== dismissedAnnId
+  usePusherEvent<AnnouncementPayload>(GAME_CHANNEL, 'announcement:posted', () => { jitterRevalidate() })
+  const newestNotifId = notifications[0]?.id ?? null
+  const hasUnreadNotif = !!newestNotifId && newestNotifId !== seenNotifId
+  const markNotifsSeen = useCallback(() => {
+    if (!newestNotifId) return
+    try { localStorage.setItem('fpc_notif_seen', newestNotifId) } catch { /* ignore */ }
+    setSeenNotifId(newestNotifId)
+  }, [newestNotifId])
 
   // Local competition state — updated immediately via Pusher (before loader revalidation)
   const [competitionEnabled, setCompetitionEnabledLocal] = useState(loaderData.competitionEnabled)
@@ -2911,7 +2953,7 @@ export default function FishPrawnCrabGame() {
                 <ProfileDropdown name={displayName} onClose={() => setOverlayProfileOpen(false)} competitionEnabled={competitionMenuVisible} competitionType={loaderData.competitionType} onJoinGroup={() => setJoinGroupOpen(true)} />
               )}
               {/* Announcement bell — always shown, right after the profile */}
-              <AnnouncementBell message={announcement?.message ?? null} hasUnread={showAnnouncement} onDismiss={dismissAnnouncement} />
+              <AnnouncementBell notifications={notifications} hasUnread={hasUnreadNotif} onSeen={markNotifsSeen} />
             </div>
 
             {/* Center: mode selector — hidden when self-play is disabled (live only) */}
@@ -3522,7 +3564,7 @@ export default function FishPrawnCrabGame() {
               </>
             )}
             {/* Announcement bell — always shown, right after the profile */}
-            <AnnouncementBell message={announcement?.message ?? null} hasUnread={showAnnouncement} onDismiss={dismissAnnouncement} />
+            <AnnouncementBell notifications={notifications} hasUnread={hasUnreadNotif} onSeen={markNotifsSeen} />
           </div>
 
           <div className="flex items-center gap-3">

@@ -181,6 +181,37 @@ export async function getAnnouncement(): Promise<Announcement | null> {
   })
 }
 
+// ─── User notification feed (all admin-sent notifications) ───────────────────
+// Every notification the admin sends is a NotificationCampaign row. The user's
+// bell shows the recent ones. Cached (all users see the same list; templating
+// is applied per-user in the loader), invalidated when a new one is sent.
+export interface FeedNotification {
+  id: string
+  title: string | null
+  message: string
+  createdAt: string
+}
+
+export async function getRecentNotifications(): Promise<FeedNotification[]> {
+  return ssCached('recentNotifications', 30_000, async () => {
+    try {
+      const rows = await prisma.notificationCampaign.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: { id: true, title: true, message: true, createdAt: true },
+      })
+      return rows.map(r => ({ id: r.id, title: r.title, message: r.message, createdAt: r.createdAt.toISOString() }))
+    } catch {
+      return []
+    }
+  })
+}
+
+// Call after creating/deleting a campaign so the user feed refreshes promptly.
+export function invalidateNotifications() {
+  ssInvalidate('recentNotifications')
+}
+
 // Post a new announcement (message given) or clear it (null/empty). Returns the
 // stored announcement (or null when cleared) so the caller can broadcast it.
 export async function setAnnouncement(message: string | null, adminId: string): Promise<Announcement | null> {
