@@ -101,6 +101,15 @@ export const COMPETITION_CHANNEL = 'competition'
 // the presence list. No auth needed.
 export const GAME_CHANNEL = 'game'
 
+// A persistent in-app announcement the admin posts to every customer. `message`
+// is null when the announcement is cleared. `id` changes each time a new one is
+// posted so clients can re-show it even if the previous one was dismissed.
+export interface AnnouncementPayload {
+  id: string
+  message: string | null
+  createdAt: string
+}
+
 // Fired whenever any user's demo balance changes so all open ranking pages
 // can re-fetch and animate the position change.
 export interface RankingUpdatedPayload {

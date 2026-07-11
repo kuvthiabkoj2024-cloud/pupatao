@@ -22,6 +22,7 @@ import {
   GAME_CHANNEL,
   PRESENCE_LIVE,
   userChannel,
+  type AnnouncementPayload,
   type CompetitionEndedPayload,
   type CompetitionResetPayload,
   type CompetitionSummarizedPayload,
@@ -35,7 +36,7 @@ import {
   type RoundStartedPayload,
   type TxUpdatedPayload,
 } from '~/lib/pusher-channels'
-import { ArrowDown, ArrowUp, ArrowUpDown, BookOpen, CalendarClock, Check, ChevronDown, Eye, LogOut, MessageCircle, ReceiptText, RefreshCw, Share2, Undo, User, Users, Volume2, VolumeOff, Wallet, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, BellRing, BookOpen, CalendarClock, Check, ChevronDown, Eye, LogOut, MessageCircle, ReceiptText, RefreshCw, Share2, Undo, User, Users, Volume2, VolumeOff, Wallet, X } from 'lucide-react'
 
 type SymbolKey = 'fish' | 'prawn' | 'crab' | 'rooster' | 'gourd' | 'frog'
 
@@ -1193,6 +1194,77 @@ interface PickerDropdownProps {
   align?: 'left' | 'right'
 }
 
+// Admin announcement, shown as a bell right after the profile. Always visible;
+// the red dot appears when there's an unread announcement, and tapping opens a
+// popover with the full text (or an empty state).
+function AnnouncementBell({
+  message, hasUnread, onDismiss,
+}: {
+  message: string | null
+  hasUnread: boolean
+  onDismiss: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative z-20">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+        style={{ background: 'linear-gradient(135deg,#7c3aed,#4c1d95)', border: '1px solid #a78bfa', color: '#fde68a' }}
+        aria-label="Announcement"
+      >
+        <BellRing size={13} />
+        {hasUnread && (
+          <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full" style={{ background: '#f87171', border: '1.5px solid #1e0040' }} />
+        )}
+      </button>
+      {/* Tap the bell → full-detail modal (centered, readable on mobile). */}
+      {open && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.72)' }}
+          onClick={() => setOpen(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl p-5 shadow-2xl"
+            style={{ background: 'linear-gradient(135deg,#2d1b4e,#1e0040)', border: '1px solid #a78bfa' }}
+          >
+            <div className="mb-3 flex items-center gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full" style={{ background: 'rgba(124,58,237,0.35)' }}>
+                <BellRing size={18} style={{ color: '#fcd34d' }} />
+              </div>
+              <span className="text-sm font-bold" style={{ color: '#fde68a' }}>ປະກາດ · Announcement</span>
+              <button type="button" onClick={() => setOpen(false)} className="ml-auto flex h-7 w-7 items-center justify-center rounded-full"
+                style={{ background: 'rgba(255,255,255,0.08)', color: '#a78bfa' }} aria-label="Close">
+                <X size={16} />
+              </button>
+            </div>
+            {message ? (
+              <p className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: '#e9d5ff' }}>{message}</p>
+            ) : (
+              <p className="text-sm" style={{ color: '#a78bfa' }}>ບໍ່ມີການແຈ້ງເຕືອນ · No announcements</p>
+            )}
+            {message && (
+              <button
+                type="button"
+                onClick={() => { onDismiss(); setOpen(false) }}
+                className="mt-5 w-full rounded-xl py-2.5 text-sm font-bold"
+                style={{ background: 'linear-gradient(135deg,#7c3aed,#4c1d95)', color: '#fff', border: '1px solid #a78bfa' }}
+              >
+                ຮັບຊາບ · Got it
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PickerDropdown({ items, active, onSelect, onClose, align = 'left' }: PickerDropdownProps) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -1277,8 +1349,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   // The currently in-flight LIVE round (if any), plus the admin-controlled
   // stream URL and next schedule from SystemSetting. The stream URL is set
   // when admin starts a round and cleared when admin clicks "End Live".
-  const { getLiveStreamUrl, getLiveSchedule, getCompetitionConfig } = await import('~/lib/system-settings.server')
-  const [liveRoundRaw, liveStreamUrl, schedule, competitionCfg] = await Promise.all([
+  const { getLiveStreamUrl, getLiveSchedule, getCompetitionConfig, getAnnouncement } = await import('~/lib/system-settings.server')
+  const [liveRoundRaw, liveStreamUrl, schedule, competitionCfg, announcement] = await Promise.all([
     prisma.gameRound.findFirst({
       where: { mode: 'LIVE', status: { in: ['BETTING', 'LOCKED', 'AWAITING_RESULT'] } },
       orderBy: { createdAt: 'desc' },
@@ -1287,6 +1359,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     getLiveStreamUrl(),
     getLiveSchedule(),
     getCompetitionConfig(),
+    getAnnouncement(),
   ])
   const liveRound = liveRoundRaw
     ? {
@@ -1306,7 +1379,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     return {
       selfPlayHistory: [] as SymbolKey[][],
       liveHistory: [] as SymbolKey[][],
-      liveRound, liveStreamUrl, schedule,
+      liveRound, liveStreamUrl, schedule, announcement,
       competitionEnabled: competitionCfg.enabled,
       competitionMenuVisible: competitionCfg.menuVisible,
       competitionType: competitionCfg.type,
@@ -1384,6 +1457,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     liveRound,
     liveStreamUrl,
     schedule,
+    announcement,
     competitionEnabled: competitionCfg.enabled,
     competitionMenuVisible: competitionCfg.menuVisible,
     competitionType: competitionCfg.type,
@@ -1403,6 +1477,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       liveRound: null,
       liveStreamUrl: null,
       schedule: { start: null as string | null, end: null as string | null, notice: null as string | null },
+      announcement: null as { id: string; message: string; createdAt: string } | null,
       competitionEnabled: false,
       competitionMenuVisible: false,
       competitionType: 'DEMO_LIVE' as const,
@@ -1599,6 +1674,26 @@ export default function FishPrawnCrabGame() {
     setLiveRoundActive(false)
     setLiveMirror(null)
   })
+
+  // ── Admin announcement banner ───────────────────────────────────────────
+  // A persistent message the admin posts to everyone. Seeded from the loader,
+  // updated live via the public game channel. Dismissal is tracked by id in
+  // localStorage so a dismissed one stays hidden, but a NEW post re-appears.
+  const [announcement, setAnnouncement] = useState(loaderData.announcement)
+  useEffect(() => { setAnnouncement(loaderData.announcement) }, [loaderData.announcement?.id])
+  const [dismissedAnnId, setDismissedAnnId] = useState<string | null>(null)
+  useEffect(() => {
+    try { setDismissedAnnId(localStorage.getItem('fpc_ann_dismissed')) } catch { /* ignore */ }
+  }, [])
+  usePusherEvent<AnnouncementPayload>(GAME_CHANNEL, 'announcement:posted', payload => {
+    setAnnouncement(payload.message ? { id: payload.id, message: payload.message, createdAt: payload.createdAt } : null)
+  })
+  const dismissAnnouncement = useCallback(() => {
+    if (!announcement) return
+    try { localStorage.setItem('fpc_ann_dismissed', announcement.id) } catch { /* ignore */ }
+    setDismissedAnnId(announcement.id)
+  }, [announcement])
+  const showAnnouncement = !!announcement && announcement.id !== dismissedAnnId
 
   // Local competition state — updated immediately via Pusher (before loader revalidation)
   const [competitionEnabled, setCompetitionEnabledLocal] = useState(loaderData.competitionEnabled)
@@ -2815,6 +2910,8 @@ export default function FishPrawnCrabGame() {
               {overlayProfileOpen && !isAnonymous && (
                 <ProfileDropdown name={displayName} onClose={() => setOverlayProfileOpen(false)} competitionEnabled={competitionMenuVisible} competitionType={loaderData.competitionType} onJoinGroup={() => setJoinGroupOpen(true)} />
               )}
+              {/* Announcement bell — always shown, right after the profile */}
+              <AnnouncementBell message={announcement?.message ?? null} hasUnread={showAnnouncement} onDismiss={dismissAnnouncement} />
             </div>
 
             {/* Center: mode selector — hidden when self-play is disabled (live only) */}
@@ -3424,6 +3521,8 @@ export default function FishPrawnCrabGame() {
                 )}
               </>
             )}
+            {/* Announcement bell — always shown, right after the profile */}
+            <AnnouncementBell message={announcement?.message ?? null} hasUnread={showAnnouncement} onDismiss={dismissAnnouncement} />
           </div>
 
           <div className="flex items-center gap-3">

@@ -5,6 +5,7 @@ import {
   GAME_CHANNEL,
   PRESENCE_LIVE,
   userChannel,
+  type AnnouncementPayload,
   type BetPlacedPayload,
   type CompetitionEndedPayload,
   type CompetitionParticipantChangedPayload,
@@ -114,6 +115,7 @@ export function notifyGame(event: 'round:dice', payload: RoundDicePayload): Prom
 export function notifyGame(event: 'round:resolved', payload: RoundResolvedPayload): Promise<void>
 export function notifyGame(event: 'round:streamUpdated', payload: RoundStreamUpdatedPayload): Promise<void>
 export function notifyGame(event: 'live:ended', payload: LiveEndedPayload): Promise<void>
+export function notifyGame(event: 'announcement:posted', payload: AnnouncementPayload): Promise<void>
 export function notifyGame(event: string, payload: unknown): Promise<void> {
   return triggerSafe(GAME_CHANNEL, event, payload)
 }

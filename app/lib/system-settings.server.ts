@@ -57,6 +57,7 @@ export interface CompetitionWinner {
   profile: string | null
   demoBalance: number
 }
+export const ANNOUNCEMENT_KEY           = 'activeAnnouncement'
 export const LIVE_STREAM_URL_KEY        = 'liveStreamUrl'
 export const LIVE_SCHEDULE_START_KEY    = 'liveScheduleStart'
 export const LIVE_SCHEDULE_END_KEY      = 'liveScheduleEnd'
@@ -153,6 +154,54 @@ export async function setLiveSchedule(
     upsertOrDelete(LIVE_SCHEDULE_NOTICE_KEY, notice ?? null),
   ])
   ssInvalidate('liveSchedule')
+}
+
+// ─── Persistent in-app announcement ──────────────────────────────────────────
+// A single banner message the admin posts to every customer. Stored as JSON so
+// each post gets a fresh id (lets clients re-show it even if a previous one was
+// dismissed). null = no announcement.
+export interface Announcement {
+  id: string
+  message: string
+  createdAt: string
+}
+
+export async function getAnnouncement(): Promise<Announcement | null> {
+  return ssCached('announcement', 8000, async () => {
+    try {
+      const s = await prisma.systemSetting.findUnique({
+        where: { key: ANNOUNCEMENT_KEY },
+        select: { value: true },
+      })
+      if (!s?.value) return null
+      return JSON.parse(s.value) as Announcement
+    } catch {
+      return null
+    }
+  })
+}
+
+// Post a new announcement (message given) or clear it (null/empty). Returns the
+// stored announcement (or null when cleared) so the caller can broadcast it.
+export async function setAnnouncement(message: string | null, adminId: string): Promise<Announcement | null> {
+  if (!message || !message.trim()) {
+    await prisma.systemSetting.deleteMany({ where: { key: ANNOUNCEMENT_KEY } })
+    ssInvalidate('announcement')
+    return null
+  }
+  const announcement: Announcement = {
+    id: crypto.randomUUID(),
+    message: message.trim(),
+    createdAt: new Date().toISOString(),
+  }
+  const value = JSON.stringify(announcement)
+  await prisma.systemSetting.upsert({
+    where: { key: ANNOUNCEMENT_KEY },
+    create: { key: ANNOUNCEMENT_KEY, value, updatedBy: adminId },
+    update: { value, updatedBy: adminId },
+  })
+  ssInvalidate('announcement')
+  return announcement
 }
 
 // ─── Competition ─────────────────────────────────────────────────────────────
