@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Form, useFetcher, useLoaderData, useNavigation, useRevalidator } from 'react-router'
 import { ArrowDown, ArrowUp, ArrowUpDown, CalendarClock, Check, Loader, Lock, PlayCircle, Radio, Square, Users as UsersIcon, X } from 'lucide-react'
-import type { DiceSymbol } from '@prisma/client'
+import type { DiceSymbol, RangeKey } from '@prisma/client'
 import type { Route } from './+types/admin.live'
 import { requireAdmin } from '~/lib/admin-auth.server'
 import { prisma } from '~/lib/prisma.server'
@@ -100,6 +100,85 @@ function computeBetPayout(
   }
   return 0
 }
+
+// ─── Live-result correction helpers ───────────────────────────────────────
+// Admin re-enters the dice for an already-RESOLVED round; we adjust each
+// bettor's balance by the DIFFERENCE between the payout under the new dice and
+// the payout under the old dice. Stakes were debited at placement and never
+// change, so only the credited winnings need correcting.
+const CORRECTION_WINDOW_MS = 60 * 60 * 1000 // 1 hour after the original resolve
+
+type CorrectionBet = {
+  id: string
+  userId: string
+  walletId: string
+  amount: number
+  kind: string
+  symbol: string | null
+  range: RangeKey | null
+  pairA: string | null
+  pairB: string | null
+  exactSum: number | null
+  walletType: 'DEMO' | 'REAL' | 'PROMO'
+  selfPlayPhase: string
+}
+type BetOutcome = { id: string; payout: number; result: 'WIN' | 'LOSS' | 'REFUNDED' }
+
+// Replicates the resolve settlement's per-bet outcome logic (the ADMIN_LOCKED
+// round-void rule + computeBetPayout) for an arbitrary dice result. Called for
+// both the OLD dice (to reconstruct what was credited) and the NEW dice.
+function computeOutcomes(
+  bets: CorrectionBet[],
+  dice: DiceSymbol[],
+  diceSum: number,
+  cfg: PayoutConfig,
+  livePromo: LivePromo,
+): BetOutcome[] {
+  const promoSum = livePromo.sum
+  const userHasBigBet = new Set<string>()
+  const userBigBetWon = new Set<string>()
+  for (const b of bets) {
+    if (b.selfPlayPhase !== 'ADMIN_LOCKED') continue
+    const potentialProfit = liveBetPotentialReturn(b, cfg, { promoSum }) - b.amount
+    if (potentialProfit <= LOCKED_LIVE_VOID_RETURN_MIN) continue
+    userHasBigBet.add(b.userId)
+    if (computeBetPayout(b, dice, diceSum, cfg, livePromo) > 0) userBigBetWon.add(b.userId)
+  }
+  const refundUserIds = new Set([...userHasBigBet].filter(uid => userBigBetWon.has(uid)))
+  return bets.map(b => {
+    if (refundUserIds.has(b.userId)) return { id: b.id, payout: b.amount, result: 'REFUNDED' as const }
+    const payout = computeBetPayout(b, dice, diceSum, cfg, livePromo)
+    return { id: b.id, payout, result: payout > 0 ? ('WIN' as const) : ('LOSS' as const) }
+  })
+}
+
+// The exact money a settlement credits, keyed by `${userId}:${destWalletType}`.
+// Mirrors resolve's crediting rules so old-vs-new can be diffed per wallet:
+//  • REFUNDED → stake back to the bet's own wallet
+//  • WIN on DEMO/REAL → full payout to that wallet
+//  • WIN on PROMO → winning stake to PROMO, profit to the user's REAL wallet
+//  • LOSS → nothing
+function creditVector(bets: CorrectionBet[], outcomes: BetOutcome[]): Map<string, number> {
+  const m = new Map<string, number>()
+  const add = (userId: string, walletType: 'DEMO' | 'REAL' | 'PROMO', amt: number) => {
+    if (!amt) return
+    const k = `${userId}:${walletType}`
+    m.set(k, (m.get(k) ?? 0) + amt)
+  }
+  bets.forEach((b, i) => {
+    const o = outcomes[i]
+    if (o.result === 'REFUNDED') { add(b.userId, b.walletType, b.amount); return }
+    if (o.payout <= 0) return
+    if (b.walletType === 'PROMO') {
+      add(b.userId, 'PROMO', b.amount)             // winning stake refunds to PROMO
+      add(b.userId, 'REAL', o.payout - b.amount)   // profit credited to REAL
+    } else {
+      add(b.userId, b.walletType, o.payout)
+    }
+  })
+  return m
+}
+
 // Asset filenames live at /symbols/<lowercase>.png — same files the player view uses.
 const SYMBOL_FILE: Record<DiceSymbol, string> = {
   FISH: 'fish', PRAWN: 'prawn', CRAB: 'crab', ROOSTER: 'rooster', GOURD: 'gourd', FROG: 'frog',
@@ -917,6 +996,183 @@ export async function action({ request }: Route.ActionArgs) {
           players,
         },
       }
+    }
+
+    if (op === 'correctResult') {
+      // Re-enter the dice for an already-RESOLVED live round and adjust every
+      // bettor's balance by the DIFFERENCE between the new and old payout.
+      // `preview=true` computes the impact without moving money.
+      if (admin.role === 'SUPPORT') return { error: translate(locale, 'admin.live.action.correctNoPermission') }
+      if (round.mode !== 'LIVE' || round.status !== 'RESOLVED' || !round.resolvedAt) {
+        return { error: translate(locale, 'admin.live.action.correctResolvedOnly') }
+      }
+      if (!round.dice1 || !round.dice2 || !round.dice3 || round.diceSum == null) {
+        return { error: translate(locale, 'admin.live.action.correctNoOriginal') }
+      }
+      if (Date.now() - round.resolvedAt.getTime() > CORRECTION_WINDOW_MS) {
+        return { error: translate(locale, 'admin.live.action.correctWindowExpired') }
+      }
+      const nd1 = String(fd.get('dice1') ?? '') as DiceSymbol
+      const nd2 = String(fd.get('dice2') ?? '') as DiceSymbol
+      const nd3 = String(fd.get('dice3') ?? '') as DiceSymbol
+      if (![nd1, nd2, nd3].every(s => SYMBOLS.includes(s))) {
+        return { error: translate(locale, 'admin.live.action.invalidSymbol') }
+      }
+      if (nd1 === round.dice1 && nd2 === round.dice2 && nd3 === round.dice3) {
+        return { error: translate(locale, 'admin.live.action.correctNoChange') }
+      }
+      const newDice = [nd1, nd2, nd3] as DiceSymbol[]
+      const newDiceSum = SYMBOL_VALUE[nd1] + SYMBOL_VALUE[nd2] + SYMBOL_VALUE[nd3]
+      const oldDice = [round.dice1, round.dice2, round.dice3] as DiceSymbol[]
+      const oldDiceSum = round.diceSum
+      const isPreview = String(fd.get('preview') ?? '') === 'true'
+
+      const rawBets = await prisma.bet.findMany({
+        where: { roundId },
+        select: {
+          id: true, userId: true, walletId: true, amount: true, kind: true,
+          symbol: true, range: true, pairA: true, pairB: true, exactSum: true,
+          user: { select: { tel: true, firstName: true, lastName: true, selfPlayPhase: true } },
+          wallet: { select: { type: true } },
+        },
+      })
+      const cbets: CorrectionBet[] = rawBets.map(b => ({
+        id: b.id, userId: b.userId, walletId: b.walletId, amount: b.amount, kind: b.kind,
+        symbol: b.symbol, range: b.range, pairA: b.pairA, pairB: b.pairB, exactSum: b.exactSum,
+        walletType: b.wallet.type as 'DEMO' | 'REAL' | 'PROMO',
+        selfPlayPhase: b.user.selfPlayPhase,
+      }))
+
+      const cfg = getPayoutConfig()
+      const livePromo: LivePromo = { sum: process.env.PROMO_SUM === 'true' }
+      const oldOutcomes = computeOutcomes(cbets, oldDice, oldDiceSum, cfg, livePromo)
+      const newOutcomes = computeOutcomes(cbets, newDice, newDiceSum, cfg, livePromo)
+      const oldCredits = creditVector(cbets, oldOutcomes)
+      const newCredits = creditVector(cbets, newOutcomes)
+
+      // Diff old-vs-new per (userId, walletType).
+      type Delta = { userId: string; walletType: 'DEMO' | 'REAL' | 'PROMO'; delta: number }
+      const deltas: Delta[] = []
+      for (const k of new Set([...oldCredits.keys(), ...newCredits.keys()])) {
+        const sep = k.lastIndexOf(':')
+        const userId = k.slice(0, sep)
+        const walletType = k.slice(sep + 1) as 'DEMO' | 'REAL' | 'PROMO'
+        const d = (newCredits.get(k) ?? 0) - (oldCredits.get(k) ?? 0)
+        if (d !== 0) deltas.push({ userId, walletType, delta: d })
+      }
+
+      const userMeta = new Map<string, { tel: string; name: string | null }>()
+      for (const b of rawBets) {
+        if (!userMeta.has(b.userId)) userMeta.set(b.userId, {
+          tel: b.user.tel,
+          name: [b.user.firstName, b.user.lastName].filter(Boolean).join(' ') || null,
+        })
+      }
+
+      // Resolve each delta to a wallet + its current balance.
+      const affected = await Promise.all(deltas.map(async d => {
+        const w = await prisma.wallet.findUnique({
+          where: { userId_type: { userId: d.userId, type: d.walletType } },
+          select: { id: true, balance: true },
+        })
+        return { ...d, walletId: w?.id ?? null, balanceBefore: w?.balance ?? 0 }
+      }))
+
+      // House figures exclude DEMO (play money) — matches the resolve summary.
+      const realDeltas = deltas.filter(d => d.walletType !== 'DEMO')
+      const totalCredit = realDeltas.filter(d => d.delta > 0).reduce((s, d) => s + d.delta, 0)
+      const totalDebit = realDeltas.filter(d => d.delta < 0).reduce((s, d) => s - d.delta, 0)
+      const previewSummary = {
+        roundId,
+        oldDice: oldDice as string[],
+        oldDiceSum,
+        newDice: newDice as string[],
+        newDiceSum,
+        affectedBets: newOutcomes.filter((o, i) => o.payout !== oldOutcomes[i].payout).length,
+        totalCredit,
+        totalDebit,
+        houseImpact: totalDebit - totalCredit, // positive = house recovers money
+        players: affected.map(a => ({
+          userId: a.userId,
+          userTel: userMeta.get(a.userId)?.tel ?? '',
+          userName: userMeta.get(a.userId)?.name ?? null,
+          walletType: a.walletType,
+          delta: a.delta,
+          balanceBefore: a.balanceBefore,
+          balanceAfter: a.balanceBefore + a.delta,
+          missing: a.walletId == null,
+        })),
+      }
+
+      if (isPreview) return { ok: true, correctionPreview: previewSummary }
+
+      // ── Apply ──────────────────────────────────────────────────────────────
+      // resolvedAt is intentionally NOT touched, so the 1-hour correction window
+      // stays anchored to the ORIGINAL resolve time (re-correcting can't extend it).
+      const afterBalances = await withWriteConflictRetry(() => prisma.$transaction(async db => {
+        await db.gameRound.update({
+          where: { id: roundId },
+          data: { dice1: nd1, dice2: nd2, dice3: nd3, diceSum: newDiceSum },
+        })
+        const after: Record<string, number> = {}
+        for (const a of affected) {
+          if (!a.walletId || a.delta === 0) continue
+          const w = await db.wallet.findUnique({ where: { id: a.walletId } })
+          if (!w) continue
+          const before = w.balance
+          const bal = before + a.delta // may go negative — allowed by design
+          await db.wallet.update({ where: { id: a.walletId }, data: { balance: bal, version: { increment: 1 } } })
+          await db.transaction.create({
+            data: {
+              userId: a.userId, walletId: a.walletId, type: 'ADJUSTMENT',
+              amount: Math.abs(a.delta), balanceBefore: before, balanceAfter: bal,
+              status: 'COMPLETED', roundId, idempotencyKey: crypto.randomUUID(),
+              note: a.delta > 0
+                ? `Live round result corrected — credit (#${roundId.slice(-6)})`
+                : `Live round result corrected — debit (#${roundId.slice(-6)})`,
+            },
+          })
+          after[a.userId] = bal
+        }
+        return after
+      }, { timeout: 60000, maxWait: 15000 }))
+
+      // Non-money follow-ups: rewrite per-bet result/payout + audit (best-effort).
+      await Promise.allSettled([
+        ...newOutcomes.map(o =>
+          prisma.bet.update({ where: { id: o.id }, data: { payout: o.payout, result: o.result } })
+            .catch(err => console.error('[round.correctResult] bet write failed', o.id, err))),
+        prisma.auditLog.create({
+          data: {
+            actorId: admin.id,
+            action: 'round.correctResult',
+            target: `round:${roundId}`,
+            metadata: {
+              oldDice, oldDiceSum, newDice, newDiceSum,
+              totalCredit, totalDebit, deltaWallets: deltas.length, bets: rawBets.length,
+            },
+          },
+        }).catch(() => {}),
+      ])
+
+      // Broadcast corrected dice so play-history + every viewer refreshes.
+      const resolvedPayload = { roundId, mode: 'LIVE' as const, dice: newDice as string[], diceSum: newDiceSum }
+      notifyAdmin('round:resolved', resolvedPayload)
+      notifyPresenceLive('round:resolved', resolvedPayload)
+      notifyGame('round:resolved', resolvedPayload)
+      for (const a of affected) {
+        if (!a.walletId) continue
+        notifyUser(a.userId, 'transaction:updated', {
+          id: `round-correct:${roundId}`,
+          status: 'COMPLETED',
+          type: a.delta > 0 ? 'DEPOSIT' : 'WITHDRAW',
+          amount: Math.abs(a.delta),
+          balanceAfter: afterBalances[a.userId] ?? a.balanceBefore + a.delta,
+          note: 'Live round result corrected',
+        })
+      }
+
+      return { ok: true, correctionApplied: previewSummary }
     }
 
     if (op === 'cancel') {
@@ -1979,6 +2235,28 @@ type ResolveSummary = {
   }[]
 }
 
+type CorrectionPreview = {
+  roundId: string
+  oldDice: string[]
+  oldDiceSum: number
+  newDice: string[]
+  newDiceSum: number
+  affectedBets: number
+  totalCredit: number
+  totalDebit: number
+  houseImpact: number
+  players: {
+    userId: string
+    userTel: string
+    userName: string | null
+    walletType: 'DEMO' | 'REAL' | 'PROMO'
+    delta: number
+    balanceBefore: number
+    balanceAfter: number
+    missing: boolean
+  }[]
+}
+
 // Always-visible stream area. Shows the active round's stream + URL update
 // form when a round is open; falls back to the last known stream URL when
 // no round is active so the admin keeps watching the camera between rounds.
@@ -2546,6 +2824,18 @@ function StreamEmbed({ url }: { url: string | null }) {
 function HistoryRow({ r }: { r: HistoryRound }) {
   const t = useT()
   const dice = [r.dice1, r.dice2, r.dice3].filter(Boolean) as DiceSymbol[]
+  const [correcting, setCorrecting] = useState(false)
+  // Eligible = RESOLVED with all 3 dice, within 1h of resolve. Computed after
+  // mount (nowMs) so SSR/first render match and there's no hydration mismatch.
+  const [nowMs, setNowMs] = useState<number | null>(null)
+  useEffect(() => { setNowMs(Date.now()) }, [])
+  const canCorrect =
+    nowMs != null &&
+    r.status === 'RESOLVED' &&
+    dice.length === 3 &&
+    r.resolvedAt != null &&
+    nowMs - new Date(r.resolvedAt).getTime() <= 60 * 60 * 1000
+
   return (
     <div
       className="flex flex-col gap-1 rounded-xl px-4 py-3 md:flex-row md:items-center md:justify-between"
@@ -2562,26 +2852,227 @@ function HistoryRow({ r }: { r: HistoryRound }) {
           {t('admin.live.host')} {r.host ?? <span style={{ color: '#64748b' }}>—</span>}
         </div>
       </div>
-      {dice.length > 0 ? (
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1">
-            {dice.map((s, i) => (
-              <img
-                key={i}
-                src={symbolSrc(s)}
-                alt={s}
-                className="h-7 w-7 rounded object-contain"
-                style={{ border: '1px solid #312e81', background: '#1e1b4b' }}
-              />
-            ))}
+      <div className="flex items-center gap-2">
+        {dice.length > 0 ? (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
+              {dice.map((s, i) => (
+                <img
+                  key={i}
+                  src={symbolSrc(s)}
+                  alt={s}
+                  className="h-7 w-7 rounded object-contain"
+                  style={{ border: '1px solid #312e81', background: '#1e1b4b' }}
+                />
+              ))}
+            </div>
+            <span className="rounded-md px-2 py-0.5 text-[10px] font-bold " style={{ background: '#1e1b4b', color: '#fde68a', border: '1px solid #4338ca' }}>
+              {t('admin.live.settled.sum', { n: r.diceSum ?? '—' })}
+            </span>
           </div>
-          <span className="rounded-md px-2 py-0.5 text-[10px] font-bold " style={{ background: '#1e1b4b', color: '#fde68a', border: '1px solid #4338ca' }}>
-            {t('admin.live.settled.sum', { n: r.diceSum ?? '—' })}
+        ) : (
+          <span className="text-[10px]" style={{ color: '#64748b' }}>{t('admin.live.noResult')}</span>
+        )}
+        {canCorrect && (
+          <button
+            type="button"
+            onClick={() => setCorrecting(true)}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold"
+            style={{ background: '#1e1b4b', color: '#fdba74', border: '1px solid #ea580c' }}
+          >
+            {t('admin.live.correct.btn')}
+          </button>
+        )}
+      </div>
+      {correcting && <CorrectResultModal r={r} onClose={() => setCorrecting(false)} />}
+    </div>
+  )
+}
+
+// Re-enter the dice for a resolved round. Two steps: PREVIEW (server recomputes
+// the per-wallet money impact without moving funds) → APPLY (commits it).
+function CorrectResultModal({ r, onClose }: { r: HistoryRound; onClose: () => void }) {
+  const t = useT()
+  const revalidator = useRevalidator()
+  const fetcher = useFetcher<{ ok?: boolean; correctionPreview?: CorrectionPreview; correctionApplied?: CorrectionPreview; error?: string }>()
+  const current = [r.dice1, r.dice2, r.dice3] as DiceSymbol[]
+  const [dice, setDice] = useState<DiceSymbol[]>(current)
+  const busy = fetcher.state !== 'idle'
+  const preview = fetcher.data?.correctionPreview ?? null
+  const applied = fetcher.data?.correctionApplied ?? null
+  const changed = dice.some((d, i) => d !== current[i])
+  // A preview is only actionable while it still matches the on-screen dice —
+  // editing the dice after previewing forces a fresh preview before Apply.
+  const previewMatches = preview != null && preview.newDice.join() === dice.join()
+
+  function submit(isPreview: boolean) {
+    fetcher.submit(
+      { op: 'correctResult', roundId: r.id, dice1: dice[0], dice2: dice[1], dice3: dice[2], preview: String(isPreview) },
+      { method: 'post' },
+    )
+  }
+
+  // On successful apply, refresh the history list then let the admin close.
+  useEffect(() => {
+    if (applied) revalidator.revalidate()
+  }, [applied]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const newSum = dice.reduce((s, d) => s + SYMBOL_VALUE[d], 0)
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(2,6,23,0.8)' }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-2xl p-5"
+        style={{ background: '#0b1120', border: '1px solid #ea580c', maxHeight: '90vh', overflowY: 'auto' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-sm font-bold" style={{ color: '#fdba74' }}>
+            {t('admin.live.correct.title')} · #{r.id.slice(-6)}
           </span>
+          <button type="button" onClick={onClose} className="rounded-md p-1" style={{ color: '#a5b4fc' }} aria-label={t('admin.live.correct.close')}>
+            <X size={16} />
+          </button>
         </div>
-      ) : (
-        <span className="text-[10px]" style={{ color: '#64748b' }}>{t('admin.live.noResult')}</span>
-      )}
+
+        {applied ? (
+          <div className="flex flex-col items-center gap-3 py-4">
+            <div className="inline-flex items-center gap-2 text-sm font-bold" style={{ color: '#4ade80' }}>
+              <Check size={16} /> {t('admin.live.correct.applied')}
+            </div>
+            <div className="flex items-center gap-1">
+              {applied.newDice.map((s, i) => (
+                <img key={i} src={symbolSrc(s as DiceSymbol)} alt={s} className="h-10 w-10 rounded object-contain" style={{ border: '1px solid #312e81', background: '#1e1b4b' }} />
+              ))}
+              <span className="ml-1 rounded-md px-2 py-1 text-[11px] font-bold" style={{ background: '#1e1b4b', color: '#fde68a', border: '1px solid #4338ca' }}>
+                {t('admin.live.settled.sum', { n: applied.newDiceSum })}
+              </span>
+            </div>
+            <button type="button" onClick={onClose} className="mt-1 rounded-md px-4 py-1.5 text-[11px] font-bold" style={{ background: '#1e1b4b', color: '#a5b4fc', border: '1px solid #4338ca' }}>
+              {t('admin.live.correct.close')}
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Current result reference */}
+            <div className="mb-3 flex items-center gap-2 text-[11px]" style={{ color: '#818cf8' }}>
+              <span>{t('admin.live.correct.currentResult')}:</span>
+              {current.map((s, i) => (
+                <img key={i} src={symbolSrc(s)} alt={s} className="h-6 w-6 rounded object-contain" style={{ border: '1px solid #312e81', background: '#1e1b4b' }} />
+              ))}
+            </div>
+
+            {/* Dice pickers */}
+            <div className="mb-3 flex flex-col gap-2">
+              <span className="text-[11px] font-bold" style={{ color: '#fdba74' }}>{t('admin.live.correct.newResult')} · {t('admin.live.settled.sum', { n: newSum })}</span>
+              {[0, 1, 2].map(idx => (
+                <div key={idx} className="flex items-center gap-1.5">
+                  <span className="w-12 text-[10px]" style={{ color: '#64748b' }}>{t('admin.live.correct.die', { n: idx + 1 })}</span>
+                  {SYMBOLS.map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setDice(prev => prev.map((d, i) => (i === idx ? s : d)))}
+                      className="rounded-md p-0.5"
+                      style={{
+                        border: dice[idx] === s ? '2px solid #fbbf24' : '1px solid #312e81',
+                        background: dice[idx] === s ? '#312e81' : '#1e1b4b',
+                      }}
+                    >
+                      <img src={symbolSrc(s)} alt={s} className="h-7 w-7 rounded object-contain" />
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+
+            {fetcher.data?.error && (
+              <p className="mb-2 text-[11px]" style={{ color: '#f87171' }}>{fetcher.data.error}</p>
+            )}
+
+            {/* Impact preview */}
+            {preview && previewMatches && (
+              <div className="mb-3 rounded-lg p-3" style={{ background: '#0f172a', border: '1px solid #1e1b4b' }}>
+                <div className="mb-2 grid grid-cols-3 gap-2 text-center">
+                  {[
+                    { label: t('admin.live.correct.totalCredit'), value: `+${preview.totalCredit.toLocaleString()}`, color: '#4ade80' },
+                    { label: t('admin.live.correct.totalDebit'), value: `-${preview.totalDebit.toLocaleString()}`, color: '#f87171' },
+                    { label: t('admin.live.correct.houseImpact'), value: `${preview.houseImpact >= 0 ? '+' : ''}${preview.houseImpact.toLocaleString()}`, color: preview.houseImpact >= 0 ? '#4ade80' : '#f87171' },
+                  ].map(s => (
+                    <div key={s.label} className="rounded-md px-2 py-1.5" style={{ background: '#1e1b4b' }}>
+                      <div className="text-[9px] font-bold" style={{ color: '#a5b4fc' }}>{s.label}</div>
+                      <div className="mt-0.5 text-xs font-bold" style={{ color: s.color }}>{s.value}</div>
+                    </div>
+                  ))}
+                </div>
+                {preview.players.length === 0 ? (
+                  <p className="text-center text-[11px]" style={{ color: '#475569' }}>{t('admin.live.correct.noImpact')}</p>
+                ) : (
+                  <>
+                    <div className="mb-1 text-[10px] font-bold" style={{ color: '#a5b4fc' }}>{t('admin.live.correct.affected')} ({preview.players.length})</div>
+                    <ul className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+                      {preview.players.map(p => (
+                        <li key={`${p.userId}:${p.walletType}`} className="flex items-center justify-between rounded-md px-2 py-1 text-[11px]" style={{ background: '#1e1b4b' }}>
+                          <span style={{ color: '#e9d5ff' }}>
+                            {p.userName ? `${p.userName} · ` : ''}{p.userTel}
+                            <span className="ml-1 text-[9px]" style={{ color: '#64748b' }}>{p.walletType}</span>
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <span className="font-bold" style={{ color: p.delta > 0 ? '#4ade80' : '#f87171' }}>
+                              {p.delta > 0 ? '+' : ''}{p.delta.toLocaleString()}
+                            </span>
+                            <span style={{ color: p.balanceAfter < 0 ? '#f87171' : '#64748b' }}>
+                              → {p.balanceAfter.toLocaleString()}
+                            </span>
+                            {p.missing && <span style={{ color: '#f87171' }}>({t('admin.live.correct.walletMissing')})</span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {preview.players.some(p => p.balanceAfter < 0) && (
+                      <p className="mt-1.5 text-[10px]" style={{ color: '#fdba74' }}>⚠ {t('admin.live.correct.negWarning')}</p>
+                    )}
+                    <p className="mt-1 text-[10px]" style={{ color: '#818cf8' }}>{t('admin.live.correct.streakWarning')}</p>
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-[11px] font-bold" style={{ background: '#1e1b4b', color: '#a5b4fc', border: '1px solid #4338ca' }}>
+                {t('admin.live.correct.cancel')}
+              </button>
+              {preview && previewMatches ? (
+                <button
+                  type="button"
+                  disabled={busy || !changed}
+                  onClick={() => submit(false)}
+                  className="inline-flex items-center gap-1 rounded-md px-4 py-1.5 text-[11px] font-bold disabled:opacity-50"
+                  style={{ background: '#7c2d12', color: '#fff', border: '1px solid #ea580c' }}
+                >
+                  {busy ? <Loader size={12} className="animate-spin" /> : null}
+                  {t('admin.live.correct.apply')}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy || !changed}
+                  onClick={() => submit(true)}
+                  className="inline-flex items-center gap-1 rounded-md px-4 py-1.5 text-[11px] font-bold disabled:opacity-50"
+                  style={{ background: '#4338ca', color: '#fff', border: '1px solid #6366f1' }}
+                >
+                  {busy ? <Loader size={12} className="animate-spin" /> : null}
+                  {t('admin.live.correct.preview')}
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
