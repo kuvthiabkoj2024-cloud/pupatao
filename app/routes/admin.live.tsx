@@ -1106,6 +1106,13 @@ export async function action({ request }: Route.ActionArgs) {
 
       if (isPreview) return { ok: true, correctionPreview: previewSummary }
 
+      // Applying moves money — require the shared confirmation code, validated
+      // server-side so a modified client can't skip it. (Env-overridable.)
+      const REVERSAL_CONFIRM_CODE = process.env.TX_REVERSAL_CODE || 'PM3-ppt'
+      if (String(fd.get('confirmCode') ?? '') !== REVERSAL_CONFIRM_CODE) {
+        return { error: translate(locale, 'admin.live.action.wrongConfirmCode') }
+      }
+
       // ── Apply ──────────────────────────────────────────────────────────────
       // resolvedAt is intentionally NOT touched, so the 1-hour correction window
       // stays anchored to the ORIGINAL resolve time (re-correcting can't extend it).
@@ -2897,8 +2904,14 @@ function CorrectResultModal({ r, onClose }: { r: HistoryRound; onClose: () => vo
   const fetcher = useFetcher<{ ok?: boolean; correctionPreview?: CorrectionPreview; correctionApplied?: CorrectionPreview; error?: string }>()
   const current = [r.dice1, r.dice2, r.dice3] as DiceSymbol[]
   const [dice, setDice] = useState<DiceSymbol[]>(current)
+  const [confirmCode, setConfirmCode] = useState('')
+  // Persist the last preview so a failed Apply (e.g. wrong code) keeps the
+  // panel + code input visible instead of collapsing back to the Preview step.
+  const [preview, setPreview] = useState<CorrectionPreview | null>(null)
   const busy = fetcher.state !== 'idle'
-  const preview = fetcher.data?.correctionPreview ?? null
+  useEffect(() => {
+    if (fetcher.data?.correctionPreview) setPreview(fetcher.data.correctionPreview)
+  }, [fetcher.data])
   const applied = fetcher.data?.correctionApplied ?? null
   const changed = dice.some((d, i) => d !== current[i])
   // A preview is only actionable while it still matches the on-screen dice —
@@ -2907,7 +2920,7 @@ function CorrectResultModal({ r, onClose }: { r: HistoryRound; onClose: () => vo
 
   function submit(isPreview: boolean) {
     fetcher.submit(
-      { op: 'correctResult', roundId: r.id, dice1: dice[0], dice2: dice[1], dice3: dice[2], preview: String(isPreview) },
+      { op: 'correctResult', roundId: r.id, dice1: dice[0], dice2: dice[1], dice3: dice[2], preview: String(isPreview), confirmCode },
       { method: 'post' },
     )
   }
@@ -3042,6 +3055,22 @@ function CorrectResultModal({ r, onClose }: { r: HistoryRound; onClose: () => vo
               </div>
             )}
 
+            {/* Confirmation code required only for the money-moving Apply step. */}
+            {preview && previewMatches && (
+              <label className="mb-2 flex flex-col gap-1">
+                <span className="text-[11px] font-bold" style={{ color: '#a5b4fc' }}>{t('admin.live.correct.codeLabel')}</span>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  value={confirmCode}
+                  onChange={e => setConfirmCode(e.target.value)}
+                  placeholder={t('admin.live.correct.codePlaceholder')}
+                  className="rounded-md px-3 py-2 text-sm font-bold outline-none"
+                  style={{ background: '#0f172a', color: '#fde68a', border: '1.5px solid #4338ca' }}
+                />
+              </label>
+            )}
+
             <div className="flex items-center justify-end gap-2">
               <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-[11px] font-bold" style={{ background: '#1e1b4b', color: '#a5b4fc', border: '1px solid #4338ca' }}>
                 {t('admin.live.correct.cancel')}
@@ -3049,7 +3078,7 @@ function CorrectResultModal({ r, onClose }: { r: HistoryRound; onClose: () => vo
               {preview && previewMatches ? (
                 <button
                   type="button"
-                  disabled={busy || !changed}
+                  disabled={busy || !changed || !confirmCode}
                   onClick={() => submit(false)}
                   className="inline-flex items-center gap-1 rounded-md px-4 py-1.5 text-[11px] font-bold disabled:opacity-50"
                   style={{ background: '#7c2d12', color: '#fff', border: '1px solid #ea580c' }}

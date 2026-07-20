@@ -21,6 +21,7 @@ export const ADMIN_LIVE_STRINGS = {
   "admin.live.action.correctNoOriginal": { lo: "ຮອບນີ້ບໍ່ມີຜົນເດີມ.", en: "This round has no original result." },
   "admin.live.action.correctWindowExpired": { lo: "ໝົດເວລາແກ້ໄຂ (ພາຍໃນ 1 ຊົ່ວໂມງຫຼັງສະຫຼຸບ).", en: "Correction window expired (within 1 hour of settling)." },
   "admin.live.action.correctNoChange": { lo: "ໝາກເຕົ໋າໃໝ່ຄືກັບເດີມ.", en: "The new dice are the same as the current result." },
+  "admin.live.action.wrongConfirmCode": { lo: "ລະຫັດຢືນຢັນບໍ່ຖືກຕ້ອງ. ຍົກເລີກການແກ້ໄຂ.", en: "Wrong confirmation code. Correction cancelled." },
 
   // ─── Correct-result modal ───────────────────────────────────────────
   "admin.live.correct.btn": { lo: "ແກ້ໄຂຜົນ", en: "Correct result" },
@@ -30,6 +31,8 @@ export const ADMIN_LIVE_STRINGS = {
   "admin.live.correct.die": { lo: "ໝາກ {n}", en: "Die {n}" },
   "admin.live.correct.preview": { lo: "ເບິ່ງຜົນກະທົບ", en: "Preview impact" },
   "admin.live.correct.apply": { lo: "ຢືນຢັນການແກ້ໄຂ", en: "Apply correction" },
+  "admin.live.correct.codeLabel": { lo: "ລະຫັດຢືນຢັນ", en: "Confirmation code" },
+  "admin.live.correct.codePlaceholder": { lo: "ປ້ອນລະຫັດຢືນຢັນ", en: "Enter confirmation code" },
   "admin.live.correct.cancel": { lo: "ຍົກເລີກ", en: "Cancel" },
   "admin.live.correct.close": { lo: "ປິດ", en: "Close" },
   "admin.live.correct.totalCredit": { lo: "ຈ່າຍເພີ່ມ", en: "Extra paid out" },
