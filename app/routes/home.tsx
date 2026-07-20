@@ -932,6 +932,7 @@ const MAX_BET_PAIR = 200_000    // Max total bet per pair combo (×6 payout → 
 const MAX_BET_MIDDLE = 200_000    // Max total bet on MIDDLE range (×6 payout → 1,200,000)
 const MAX_BET_RANGE = 1_000_000  // Max total bet on LOW / HIGH range (×2 payout → 2,000,000)
 const MAX_BET_SUM = 200_000    // Max total bet per number 3-18 (×4 payout → 800,000)
+const MAX_SINGLE_SYMBOLS = 3   // Max number of DISTINCT single symbols a user may bet per round
 
 // LIVE mode only: per betting target (symbol / range / pair / number) one user may
 // stake at most this much. All users combined are capped per target on the server
@@ -2154,6 +2155,13 @@ export default function FishPrawnCrabGame() {
     if (chips <= 0) return
     const total = selectedChip * chips
     const symbol = BOARD_LAYOUT[cell]
+    // Cap the number of DISTINCT single symbols per round. Adding chips to a symbol
+    // already bet is always allowed; a brand-new 4th symbol is blocked.
+    const betSymbols = new Set(currentBets.map(b => b.symbol))
+    if (!betSymbols.has(symbol) && betSymbols.size >= MAX_SINGLE_SYMBOLS) {
+      toast.warning(`ເດີມພັນສັດດ່ຽວໄດ້ສູງສຸດ ${MAX_SINGLE_SYMBOLS} ຕົວຕໍ່ຮອບ`)
+      return
+    }
     // LIVE caps a single symbol at 200k PER SYMBOL (summed across its board cells,
     // e.g. both GOURD cells share one cap); self-play keeps the per-cell cap.
     const cap = mode === 'live' ? MAX_BET_LIVE_PER_USER : MAX_BET_SYMBOL

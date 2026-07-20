@@ -63,6 +63,11 @@ export const ADMIN_TRANSACTIONS_STRINGS = {
   "admin.transactions.card.reject": { lo: "ປະຕິເສດ", en: "Reject" },
   "admin.transactions.card.approve": { lo: "ອະນຸມັດ", en: "Approve" },
   "admin.transactions.card.slip": { lo: "ສະລິບ", en: "Slip" },
+  "admin.transactions.card.uploadQr": { lo: "ອັບໂຫລດ QR", en: "Upload QR" },
+  "admin.transactions.card.changeQr": { lo: "ປ່ຽນ QR", en: "Change QR" },
+  "admin.transactions.card.qrUploading": { lo: "ກຳລັງອັບໂຫລດ…", en: "Uploading…" },
+  "admin.transactions.card.qrUploaded": { lo: "ອັບໂຫລດ QR ສຳເລັດ", en: "QR uploaded" },
+  "admin.transactions.card.qrUploadFailed": { lo: "ອັບໂຫລດ QR ບໍ່ສຳເລັດ", en: "QR upload failed" },
 
   // TransferCard
   "admin.transactions.transfer.unknownRecipient": { lo: "ບໍ່ຮູ້ຈັກຜູ້ຮັບ", en: "Unknown recipient" },

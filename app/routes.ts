@@ -30,6 +30,7 @@ export default [
   route("api/admin/live-history", "routes/api.admin.live-history.tsx"),
   route("api/admin/wallet-summary", "routes/api.admin.wallet-summary.tsx"),
   route("api/admin/viewer-balances", "routes/api.admin.viewer-balances.tsx"),
+  route("api/admin/tx-qr", "routes/api.admin-tx-qr.tsx"),
 
   // Admin auth (outside the admin layout — login can't require admin).
   route("admin/login", "routes/admin.login.tsx"),

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Form, Link, useLoaderData, useNavigation, useRevalidator, useSearchParams } from 'react-router'
-import { ArrowRight, Check, Loader, Maximize2, Search, X } from 'lucide-react'
+import { ArrowRight, Check, Loader, Maximize2, Search, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Route } from './+types/admin.transactions'
 import { requireAdmin, requireRole } from '~/lib/admin-auth.server'
@@ -641,6 +641,7 @@ export default function AdminTransactions() {
               onApprove={() => { setApproveAmount(String(tx.amount)); setPending({ tx, op: 'approve' }) }}
               onReject={() => { setRejectReason(''); setPending({ tx, op: 'reject' }) }}
               onSlipPreview={url => setSlipPreview(url)}
+              onQrUploaded={() => revalidator.revalidate()}
             />
           )
         )}
@@ -758,7 +759,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function TxCard({
-  tx, tab, loading, rowNum, onApprove, onReject, onSlipPreview,
+  tx, tab, loading, rowNum, onApprove, onReject, onSlipPreview, onQrUploaded,
 }: {
   tx: TxLite
   tab: 'deposit' | 'withdraw'
@@ -767,24 +768,90 @@ function TxCard({
   onApprove: () => void
   onReject: () => void
   onSlipPreview: (url: string) => void
+  onQrUploaded: () => void
 }) {
   const t = useT()
   const isPending = tx.status === 'PENDING'
+  const qrInputRef = useRef<HTMLInputElement>(null)
+  const [qrUploading, setQrUploading] = useState(false)
+
+  // Admin attaches / replaces the customer's payout QR on a withdraw request.
+  async function handleQrFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting the same file later
+    if (!file) return
+    setQrUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('txId', tx.id)
+      fd.append('file', file)
+      const res = await fetch('/api/admin/tx-qr', { method: 'POST', body: fd })
+      const json = await res.json().catch(() => ({} as { ok?: boolean; error?: string }))
+      if (!res.ok || !json.ok) throw new Error(json.error || 'failed')
+      toast.success(t('admin.transactions.card.qrUploaded'))
+      onQrUploaded()
+    } catch {
+      toast.error(t('admin.transactions.card.qrUploadFailed'))
+    } finally {
+      setQrUploading(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-3 rounded-xl p-4 md:flex-row md:items-center"
       style={{ background: '#0f172a', border: `1px solid ${isPending ? '#4338ca' : '#1e1b4b'}` }}>
-      {tx.slipUrl && (
-        <button
-          type="button"
-          onClick={() => onSlipPreview(tx.slipUrl!)}
-          className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg transition-opacity hover:opacity-80"
-          style={{ background: '#1e1b4b', border: '1px solid #4338ca' }}
-          aria-label={t('admin.transactions.card.previewSlipAria')}
-        >
-          {tx.slipUrl.endsWith('.pdf')
-            ? <span className="text-xs font-bold" style={{ color: '#fde68a' }}>📄 PDF</span>
-            : <img src={tx.slipUrl} alt={t('admin.transactions.card.slipAlt')} className="h-full w-full object-cover" />}
-        </button>
+      {(tx.slipUrl || tab === 'withdraw') && (
+        <div className="flex shrink-0 flex-col items-center gap-1">
+          {tx.slipUrl ? (
+            <button
+              type="button"
+              onClick={() => onSlipPreview(tx.slipUrl!)}
+              className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-lg transition-opacity hover:opacity-80"
+              style={{ background: '#1e1b4b', border: '1px solid #4338ca' }}
+              aria-label={t('admin.transactions.card.previewSlipAria')}
+            >
+              {tx.slipUrl.endsWith('.pdf')
+                ? <span className="text-xs font-bold" style={{ color: '#fde68a' }}>📄 PDF</span>
+                : <img src={tx.slipUrl} alt={t('admin.transactions.card.slipAlt')} className="h-full w-full object-cover" />}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => qrInputRef.current?.click()}
+              disabled={qrUploading}
+              className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded-lg transition-opacity hover:opacity-80 disabled:opacity-50"
+              style={{ background: '#1e1b4b', border: '1px dashed #4338ca', color: '#a5b4fc' }}
+            >
+              {qrUploading
+                ? <Loader size={16} className="animate-spin" />
+                : <><Upload size={16} /><span className="text-[9px] font-bold leading-tight">{t('admin.transactions.card.uploadQr')}</span></>}
+            </button>
+          )}
+          {tab === 'withdraw' && (
+            <>
+              <input
+                ref={qrInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={handleQrFile}
+              />
+              {tx.slipUrl && (
+                <button
+                  type="button"
+                  onClick={() => qrInputRef.current?.click()}
+                  disabled={qrUploading}
+                  className="inline-flex items-center gap-1 text-[10px] font-bold underline disabled:opacity-50"
+                  style={{ color: '#a5b4fc' }}
+                >
+                  {qrUploading
+                    ? <><Loader size={9} className="animate-spin" /> {t('admin.transactions.card.qrUploading')}</>
+                    : <><Upload size={9} /> {t('admin.transactions.card.changeQr')}</>}
+                </button>
+              )}
+            </>
+          )}
+        </div>
       )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
