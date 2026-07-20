@@ -48,6 +48,8 @@ export const ADMIN_TRANSACTIONS_STRINGS = {
   },
   "admin.transactions.confirm.approve": { lo: "ອະນຸມັດ", en: "Approve" },
   "admin.transactions.confirm.reject": { lo: "ປະຕິເສດ", en: "Reject" },
+  "admin.transactions.confirm.codeLabel": { lo: "ລະຫັດຢືນຢັນ", en: "Confirmation code" },
+  "admin.transactions.confirm.codePlaceholder": { lo: "ປ້ອນລະຫັດຢືນຢັນ", en: "Enter confirmation code" },
   "admin.transactions.confirm.reverse": { lo: "ຍ້ອນກັບ", en: "Reverse" },
   "admin.transactions.confirm.reapprove": { lo: "ອະນຸມັດຄືນ", en: "Re-approve" },
   "admin.transactions.confirm.reverseTitle": { lo: "ຍ້ອນກັບການ{tab}ນີ້?", en: "Reverse this {tab}?" },
@@ -114,6 +116,7 @@ export const ADMIN_TRANSACTIONS_STRINGS = {
   "admin.transactions.error.onlyDepositWithdrawRejectable": { lo: "ປະຕິເສດໄດ້ສະເພາະຄຳຂໍຝາກ/ຖອນເທົ່ານັ້ນ.", en: "Only deposit/withdraw requests can be rejected here." },
   "admin.transactions.error.onlyCompletedReversible": { lo: "ຍ້ອນກັບໄດ້ສະເພາະລາຍການທີ່ສຳເລັດແລ້ວເທົ່ານັ້ນ.", en: "Only completed transactions can be reversed." },
   "admin.transactions.error.onlyCancelledReapprovable": { lo: "ອະນຸມັດຄືນໄດ້ສະເພາະລາຍການທີ່ຖືກປະຕິເສດເທົ່ານັ້ນ.", en: "Only cancelled transactions can be re-approved." },
+  "admin.transactions.error.wrongConfirmCode": { lo: "ລະຫັດຢືນຢັນບໍ່ຖືກຕ້ອງ. ຍົກເລີກການດຳເນີນການ.", en: "Wrong confirmation code. Action cancelled." },
   "admin.transactions.error.selectRejectReason": { lo: "ກາລຸນາເລືອກສາເຫດການປະຕິເສດ.", en: "Please select a reject reason." },
   "admin.transactions.error.walletNotFound": { lo: "ບໍ່ພົບກະເປົາເງິນ.", en: "Wallet not found." },
   "admin.transactions.error.insufficientBalance": {

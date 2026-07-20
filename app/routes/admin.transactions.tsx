@@ -257,6 +257,14 @@ export async function action({ request }: Route.ActionArgs) {
     if ((op === 'reverse' || op === 'reapprove') && tx.type !== 'DEPOSIT' && tx.type !== 'WITHDRAW') {
       return { error: translate(locale, 'admin.transactions.error.onlyDepositWithdrawRejectable') }
     }
+    // Reverse / re-approve are guarded by a shared confirmation code. Validated
+    // here on the server so a modified client can't skip it. (Env-overridable.)
+    if (op === 'reverse' || op === 'reapprove') {
+      const REVERSAL_CONFIRM_CODE = process.env.TX_REVERSAL_CODE || 'PM3-ppt'
+      if (String(fd.get('confirmCode') ?? '') !== REVERSAL_CONFIRM_CODE) {
+        return { error: translate(locale, 'admin.transactions.error.wrongConfirmCode') }
+      }
+    }
 
     if (op === 'reject') {
       if (tx.type !== 'DEPOSIT' && tx.type !== 'WITHDRAW') return { error: translate(locale, 'admin.transactions.error.onlyDepositWithdrawRejectable') }
@@ -534,6 +542,8 @@ export default function AdminTransactions() {
 
   const [pending, setPending] = useState<PendingAction>(null)
   const [rejectReason, setRejectReason] = useState('')
+  // Confirmation code required to reverse / re-approve a transaction.
+  const [confirmCode, setConfirmCode] = useState('')
   // Editable deposit amount on approve — lets admin correct a wrong amount the
   // customer typed. Seeded from the tx amount when the approve modal opens.
   const [approveAmount, setApproveAmount] = useState('')
@@ -594,6 +604,7 @@ export default function AdminTransactions() {
   // Reverse / re-approve never edit the amount — use the stored value.
   const tabLabel = t(data.tab === 'deposit' ? 'admin.transactions.tab.deposit' : 'admin.transactions.tab.withdraw')
   const pendingAmount = (pending?.tx.amount ?? 0).toLocaleString()
+  const needsCode = pending?.op === 'reverse' || pending?.op === 'reapprove'
 
   return (
     <div className="flex flex-col gap-4">
@@ -723,8 +734,8 @@ export default function AdminTransactions() {
               loading={loading}
               onApprove={() => { setApproveAmount(String(tx.amount)); setPending({ tx, op: 'approve' }) }}
               onReject={() => { setRejectReason(''); setPending({ tx, op: 'reject' }) }}
-              onReverse={() => setPending({ tx, op: 'reverse' })}
-              onReapprove={() => setPending({ tx, op: 'reapprove' })}
+              onReverse={() => { setConfirmCode(''); setPending({ tx, op: 'reverse' }) }}
+              onReapprove={() => { setConfirmCode(''); setPending({ tx, op: 'reapprove' }) }}
               onSlipPreview={url => setSlipPreview(url)}
               onQrUploaded={() => revalidator.revalidate()}
             />
@@ -805,11 +816,13 @@ export default function AdminTransactions() {
           fields={
             pending.op === 'reject'
               ? { txId: pending.tx.id, op: pending.op, reason: rejectReason }
-              : isDepositApprove
-                ? { txId: pending.tx.id, op: pending.op, amount: approveAmountValid ? String(approveAmountNum) : '' }
-                : { txId: pending.tx.id, op: pending.op }
+              : needsCode
+                ? { txId: pending.tx.id, op: pending.op, confirmCode }
+                : isDepositApprove
+                  ? { txId: pending.tx.id, op: pending.op, amount: approveAmountValid ? String(approveAmountNum) : '' }
+                  : { txId: pending.tx.id, op: pending.op }
           }
-          confirmDisabled={(pending.op === 'reject' && !rejectReason) || (isDepositApprove && !approveAmountValid)}
+          confirmDisabled={(pending.op === 'reject' && !rejectReason) || (isDepositApprove && !approveAmountValid) || (needsCode && !confirmCode)}
         >
           {isDepositApprove && (
             <label className="flex flex-col gap-1">
@@ -839,6 +852,20 @@ export default function AdminTransactions() {
                   <option key={r.code} value={r.code}>{r.label[locale]}</option>
                 ))}
               </select>
+            </label>
+          )}
+          {needsCode && (
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-bold" style={{ color: '#a5b4fc' }}>{t('admin.transactions.confirm.codeLabel')}</span>
+              <input
+                type="text"
+                autoComplete="off"
+                value={confirmCode}
+                onChange={e => setConfirmCode(e.target.value)}
+                placeholder={t('admin.transactions.confirm.codePlaceholder')}
+                className="rounded-md px-3 py-2 text-sm font-bold outline-none"
+                style={{ background: '#0f172a', color: '#fde68a', border: '1.5px solid #4338ca' }}
+              />
             </label>
           )}
         </ConfirmDialog>
