@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Form, Link, useLoaderData, useNavigation, useRevalidator, useSearchParams } from 'react-router'
-import { ArrowRight, Check, Loader, Maximize2, Search, Upload, X } from 'lucide-react'
+import { ArrowRight, Check, Loader, Maximize2, Search, Undo2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Route } from './+types/admin.transactions'
 import { requireAdmin, requireRole } from '~/lib/admin-auth.server'
@@ -19,6 +19,13 @@ type Tab = 'deposit' | 'withdraw' | 'transfer' | 'reward'
 type StatusFilter = 'PENDING' | 'COMPLETED' | 'CANCELLED' | 'ALL'
 
 function isTab(v: string): v is Tab { return v === 'deposit' || v === 'withdraw' || v === 'transfer' || v === 'reward' }
+
+// Removes a trailing " — <verb> by admin (…)" suffix from a customer-facing
+// note so reverse/re-approve cycles don't accumulate stacked suffixes.
+function stripAdminSuffix(note: string | null): string {
+  if (!note) return ''
+  return note.replace(/(\s*—\s*(re-approved|approved|rejected|reversed) by admin(\s*\(amount adjusted\))?)+\s*$/i, '').trim()
+}
 function isStatus(v: string): v is StatusFilter {
   return v === 'PENDING' || v === 'COMPLETED' || v === 'CANCELLED' || v === 'ALL'
 }
@@ -229,12 +236,27 @@ export async function action({ request }: Route.ActionArgs) {
   const amountRaw = String(fd.get('amount') ?? '')
   if (!txId) return { error: translate(locale, 'admin.transactions.error.txIdRequired') }
 
-  if (op !== 'approve' && op !== 'reject') return { error: translate(locale, 'admin.transactions.error.unknownOp') }
+  // approve/reject act on PENDING; reverse undoes a COMPLETED; reapprove
+  // re-applies a CANCELLED one (both are admin mistake-corrections).
+  if (op !== 'approve' && op !== 'reject' && op !== 'reverse' && op !== 'reapprove') {
+    return { error: translate(locale, 'admin.transactions.error.unknownOp') }
+  }
 
   try {
     const tx = await prisma.transaction.findUnique({ where: { id: txId } })
     if (!tx) return { error: translate(locale, 'admin.transactions.error.txNotFound') }
-    if (tx.status !== 'PENDING') return { error: translate(locale, 'admin.transactions.error.onlyPendingReviewable') }
+    if ((op === 'approve' || op === 'reject') && tx.status !== 'PENDING') {
+      return { error: translate(locale, 'admin.transactions.error.onlyPendingReviewable') }
+    }
+    if (op === 'reverse' && tx.status !== 'COMPLETED') {
+      return { error: translate(locale, 'admin.transactions.error.onlyCompletedReversible') }
+    }
+    if (op === 'reapprove' && tx.status !== 'CANCELLED') {
+      return { error: translate(locale, 'admin.transactions.error.onlyCancelledReapprovable') }
+    }
+    if ((op === 'reverse' || op === 'reapprove') && tx.type !== 'DEPOSIT' && tx.type !== 'WITHDRAW') {
+      return { error: translate(locale, 'admin.transactions.error.onlyDepositWithdrawRejectable') }
+    }
 
     if (op === 'reject') {
       if (tx.type !== 'DEPOSIT' && tx.type !== 'WITHDRAW') return { error: translate(locale, 'admin.transactions.error.onlyDepositWithdrawRejectable') }
@@ -276,6 +298,56 @@ export async function action({ request }: Route.ActionArgs) {
       return { ok: true }
     }
 
+    // ── Reverse a COMPLETED deposit/withdraw (admin approved it by mistake) ──
+    // Undo the exact money movement the approval made and flip it to CANCELLED.
+    // Bonuses (first-topup PROMO, referral) are intentionally NOT clawed back.
+    if (op === 'reverse') {
+      const result = await prisma.$transaction(async db => {
+        const wallet = await db.wallet.findUnique({ where: { id: tx.walletId } })
+        if (!wallet) throw new Error(translate(locale, 'admin.transactions.error.walletNotFound'))
+        // DEPOSIT credited +amount → debit it back; WITHDRAW debited −amount → credit it back.
+        const delta = tx.type === 'DEPOSIT' ? -tx.amount : tx.amount
+        const newBalance = wallet.balance + delta
+        if (newBalance < 0) {
+          throw new Error(translate(locale, 'admin.transactions.error.insufficientBalance', { balance: wallet.balance.toLocaleString(), amount: tx.amount.toLocaleString() }))
+        }
+        await db.wallet.update({
+          where: { id: wallet.id },
+          data: { balance: newBalance, version: { increment: 1 } },
+        })
+        const u = await db.transaction.update({
+          where: { id: tx.id },
+          data: {
+            status: 'CANCELLED',
+            balanceBefore: wallet.balance,
+            balanceAfter: newBalance,
+            note: `${stripAdminSuffix(tx.note) || (tx.type === 'DEPOSIT' ? 'Deposit' : 'Withdraw')} — reversed by admin`,
+            approvedById: null,
+            rejectedById: admin.id,
+            reviewedAt: new Date(),
+          },
+        })
+        await db.auditLog.create({
+          data: {
+            actorId: admin.id,
+            action: tx.type === 'DEPOSIT' ? 'deposit.reverse' : 'withdraw.reverse',
+            target: `transaction:${tx.id}`,
+            metadata: { amount: tx.amount, walletId: tx.walletId, balanceBefore: wallet.balance, newBalance },
+          },
+        })
+        return u
+      }, { timeout: 15_000 })
+
+      notifyUser(tx.userId, 'transaction:updated', {
+        id: result.id, status: 'CANCELLED',
+        type: result.type as 'DEPOSIT' | 'WITHDRAW',
+        amount: result.amount, balanceAfter: result.balanceAfter, note: result.note,
+      })
+      notifyAdmin('transaction:resolved', { id: result.id })
+      return { ok: true }
+    }
+
+    // op === 'approve' or 'reapprove' — apply the transaction's forward effect.
     // Admin may correct a deposit amount the customer typed wrong. The edited
     // value becomes the official amount for this transaction (credited, stored,
     // and used for the first-topup bonus). Withdraws are never re-amounted here.
@@ -302,6 +374,11 @@ export async function action({ request }: Route.ActionArgs) {
         where: { id: wallet.id },
         data: { balance: newBalance, version: { increment: 1 } },
       })
+      const isReapprove = op === 'reapprove'
+      const approveVerb = isReapprove ? 're-approved by admin' : 'approved by admin'
+      // Strip a prior admin-action suffix on re-approval so the note doesn't
+      // grow across reverse/re-approve cycles; preserves the informative base.
+      const priorNote = (isReapprove ? stripAdminSuffix(tx.note) : tx.note) || (tx.type === 'DEPOSIT' ? 'Deposit' : 'Withdraw')
       const u = await db.transaction.update({
         where: { id: tx.id },
         data: {
@@ -310,15 +387,18 @@ export async function action({ request }: Route.ActionArgs) {
           balanceBefore: wallet.balance,
           balanceAfter: newBalance,
           // Customer-facing note (see comment above) — keep English.
-          note: `${tx.note ?? (tx.type === 'DEPOSIT' ? 'Deposit' : 'Withdraw')} — approved by admin${amountAdjusted ? ' (amount adjusted)' : ''}`,
+          note: `${priorNote} — ${approveVerb}${amountAdjusted ? ' (amount adjusted)' : ''}`,
           approvedById: admin.id,
+          // Clear any prior rejection so a re-approved tx isn't left half-marked.
+          rejectedById: null,
+          rejectReasonCode: null,
           reviewedAt: new Date(),
         },
       })
       await db.auditLog.create({
         data: {
           actorId: admin.id,
-          action: tx.type === 'DEPOSIT' ? 'deposit.approve' : 'withdraw.approve',
+          action: `${tx.type === 'DEPOSIT' ? 'deposit' : 'withdraw'}.${isReapprove ? 'reapprove' : 'approve'}`,
           target: `transaction:${tx.id}`,
           metadata: { amount: effectiveAmount, originalAmount: tx.amount, amountAdjusted, walletId: tx.walletId, newBalance },
         },
@@ -440,7 +520,7 @@ const TABS: { key: Tab; labelKey: StringKey }[] = [
 ]
 
 type TxLite = ReturnType<typeof useLoaderData<typeof loader>>['txs'][number]
-type PendingAction = { tx: TxLite; op: 'approve' | 'reject' } | null
+type PendingAction = { tx: TxLite; op: 'approve' | 'reject' | 'reverse' | 'reapprove' } | null
 
 export default function AdminTransactions() {
   const t = useT()
@@ -511,6 +591,9 @@ export default function AdminTransactions() {
   const approveDisplayAmount = isDepositApprove
     ? (approveAmountValid ? approveAmountNum : 0).toLocaleString()
     : (pending?.tx.amount ?? 0).toLocaleString()
+  // Reverse / re-approve never edit the amount — use the stored value.
+  const tabLabel = t(data.tab === 'deposit' ? 'admin.transactions.tab.deposit' : 'admin.transactions.tab.withdraw')
+  const pendingAmount = (pending?.tx.amount ?? 0).toLocaleString()
 
   return (
     <div className="flex flex-col gap-4">
@@ -640,6 +723,8 @@ export default function AdminTransactions() {
               loading={loading}
               onApprove={() => { setApproveAmount(String(tx.amount)); setPending({ tx, op: 'approve' }) }}
               onReject={() => { setRejectReason(''); setPending({ tx, op: 'reject' }) }}
+              onReverse={() => setPending({ tx, op: 'reverse' })}
+              onReapprove={() => setPending({ tx, op: 'reapprove' })}
               onSlipPreview={url => setSlipPreview(url)}
               onQrUploaded={() => revalidator.revalidate()}
             />
@@ -685,18 +770,38 @@ export default function AdminTransactions() {
           onClose={() => setPending(null)}
           title={
             pending.op === 'approve'
-              ? t('admin.transactions.confirm.approveTitle', { tab: data.tab === 'deposit' ? t('admin.transactions.tab.deposit') : t('admin.transactions.tab.withdraw'), amount: approveDisplayAmount })
-              : t('admin.transactions.confirm.rejectTitle', { tab: data.tab === 'deposit' ? t('admin.transactions.tab.deposit') : t('admin.transactions.tab.withdraw') })
+              ? t('admin.transactions.confirm.approveTitle', { tab: tabLabel, amount: approveDisplayAmount })
+              : pending.op === 'reject'
+                ? t('admin.transactions.confirm.rejectTitle', { tab: tabLabel })
+                : pending.op === 'reverse'
+                  ? t('admin.transactions.confirm.reverseTitle', { tab: tabLabel })
+                  : t('admin.transactions.confirm.reapproveTitle', { tab: tabLabel })
           }
           description={
             pending.op === 'approve'
               ? data.tab === 'deposit'
                 ? t('admin.transactions.confirm.approveDepositDesc', { tel: pending.tx.sender.tel, amount: approveDisplayAmount })
                 : t('admin.transactions.confirm.approveWithdrawDesc', { tel: pending.tx.sender.tel, amount: approveDisplayAmount })
-              : t('admin.transactions.confirm.rejectDesc', { tel: pending.tx.sender.tel })
+              : pending.op === 'reject'
+                ? t('admin.transactions.confirm.rejectDesc', { tel: pending.tx.sender.tel })
+                : pending.op === 'reverse'
+                  ? data.tab === 'deposit'
+                    ? t('admin.transactions.confirm.reverseDepositDesc', { tel: pending.tx.sender.tel, amount: pendingAmount })
+                    : t('admin.transactions.confirm.reverseWithdrawDesc', { tel: pending.tx.sender.tel, amount: pendingAmount })
+                  : data.tab === 'deposit'
+                    ? t('admin.transactions.confirm.reapproveDepositDesc', { tel: pending.tx.sender.tel, amount: pendingAmount })
+                    : t('admin.transactions.confirm.reapproveWithdrawDesc', { tel: pending.tx.sender.tel, amount: pendingAmount })
           }
-          tone={pending.op === 'approve' ? 'success' : 'danger'}
-          confirmLabel={pending.op === 'approve' ? t('admin.transactions.confirm.approve') : t('admin.transactions.confirm.reject')}
+          tone={pending.op === 'approve' || pending.op === 'reapprove' ? 'success' : 'danger'}
+          confirmLabel={
+            pending.op === 'approve'
+              ? t('admin.transactions.confirm.approve')
+              : pending.op === 'reject'
+                ? t('admin.transactions.confirm.reject')
+                : pending.op === 'reverse'
+                  ? t('admin.transactions.confirm.reverse')
+                  : t('admin.transactions.confirm.reapprove')
+          }
           fields={
             pending.op === 'reject'
               ? { txId: pending.tx.id, op: pending.op, reason: rejectReason }
@@ -759,7 +864,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function TxCard({
-  tx, tab, loading, rowNum, onApprove, onReject, onSlipPreview, onQrUploaded,
+  tx, tab, loading, rowNum, onApprove, onReject, onReverse, onReapprove, onSlipPreview, onQrUploaded,
 }: {
   tx: TxLite
   tab: 'deposit' | 'withdraw'
@@ -767,11 +872,15 @@ function TxCard({
   rowNum: number
   onApprove: () => void
   onReject: () => void
+  onReverse: () => void
+  onReapprove: () => void
   onSlipPreview: (url: string) => void
   onQrUploaded: () => void
 }) {
   const t = useT()
   const isPending = tx.status === 'PENDING'
+  const isCompleted = tx.status === 'COMPLETED'
+  const isCancelled = tx.status === 'CANCELLED'
   const qrInputRef = useRef<HTMLInputElement>(null)
   const [qrUploading, setQrUploading] = useState(false)
 
@@ -908,16 +1017,33 @@ function TxCard({
             </button>
           </div>
         ) : (
-          tx.slipUrl && (
-            <button
-              type="button"
-              onClick={() => onSlipPreview(tx.slipUrl!)}
-              className="inline-flex items-center gap-1 text-[10px] font-bold underline"
-              style={{ color: '#a5b4fc' }}
-            >
-              <Maximize2 size={10} /> {t('admin.transactions.card.slipAlt')}
-            </button>
-          )
+          <div className="flex items-center gap-2">
+            {tx.slipUrl && (
+              <button
+                type="button"
+                onClick={() => onSlipPreview(tx.slipUrl!)}
+                className="inline-flex items-center gap-1 text-[10px] font-bold underline"
+                style={{ color: '#a5b4fc' }}
+              >
+                <Maximize2 size={10} /> {t('admin.transactions.card.slipAlt')}
+              </button>
+            )}
+            {/* Admin mistake-correction: undo a completed one, or re-apply a cancelled one. */}
+            {isCompleted && (
+              <button type="button" onClick={onReverse} disabled={loading}
+                className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[10px] font-bold disabled:opacity-50"
+                style={{ background: '#7f1d1d', color: '#fff', border: '1px solid #fca5a5' }}>
+                <Undo2 size={10} /> {t('admin.transactions.confirm.reverse')}
+              </button>
+            )}
+            {isCancelled && (
+              <button type="button" onClick={onReapprove} disabled={loading}
+                className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[10px] font-bold disabled:opacity-50"
+                style={{ background: '#14532d', color: '#fff', border: '1px solid #4ade80' }}>
+                <Check size={10} /> {t('admin.transactions.confirm.reapprove')}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
