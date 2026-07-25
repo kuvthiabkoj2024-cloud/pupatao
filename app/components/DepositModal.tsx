@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useFetcher } from 'react-router'
-import { ArrowLeft, ArrowRight, Camera, CheckCircle2, Download, Loader, Upload, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Camera, CheckCircle2, Download, Loader, Upload, X } from 'lucide-react'
 import { useT } from '~/lib/use-t'
 
 interface DepositModalProps {
@@ -13,7 +13,7 @@ interface DepositModalProps {
 type UploadResponse = { url?: string; path?: string; error?: string }
 type DepositResponse = { ok?: boolean; op?: string; error?: string }
 
-type Step = 'qr' | 'slip'
+type Step = 'warn' | 'qr' | 'slip'
 
 const QR_SRC = '/images/qr-code.png'
 const SLIP_EXAMPLE_SRC = '/images/payment-slip.jpg'
@@ -32,7 +32,7 @@ export function DepositModal({ open, onClose, amount, onSuccess }: DepositModalP
   const fileInputRef = useRef<HTMLInputElement>(null)
   const t = useT()
 
-  const [step, setStep] = useState<Step>('qr')
+  const [step, setStep] = useState<Step>('warn')
   const [slipUrl, setSlipUrl] = useState('')
   const [localPreview, setLocalPreview] = useState<string | null>(null)
   const [fileType, setFileType] = useState<string>('')
@@ -50,7 +50,7 @@ export function DepositModal({ open, onClose, amount, onSuccess }: DepositModalP
   // Reset on each open.
   useEffect(() => {
     if (!open) return
-    setStep('qr')
+    setStep('warn')
     setSlipUrl('')
     setLocalPreview(null)
     setFileType('')
@@ -172,24 +172,67 @@ export function DepositModal({ open, onClose, amount, onSuccess }: DepositModalP
             <X size={18} />
           </button>
 
-          <div className="mb-1 text-center text-xs font-bold " style={{ color: '#a78bfa' }}>
-            {step === 'qr' ? t('deposit.step1') : t('deposit.step2')}
+          <div
+            className="mb-1 text-center text-xs font-bold "
+            style={{ color: step === 'warn' ? '#fca5a5' : '#a78bfa' }}
+          >
+            {step === 'warn' ? t('deposit.warnStepLabel') : step === 'qr' ? t('deposit.step1') : t('deposit.step2')}
           </div>
           <h2 className="mb-1 text-center text-2xl font-bold" style={{ color: '#fde68a' }}>
             {amount.toLocaleString()} ₭
           </h2>
 
-          {/* Step indicator dots */}
-          <div className="mb-4 flex items-center justify-center gap-1.5">
-            <span
-              className="h-1.5 w-6 rounded-full transition-colors"
-              style={{ background: step === 'qr' ? '#fde68a' : '#4c1d95' }}
-            />
-            <span
-              className="h-1.5 w-6 rounded-full transition-colors"
-              style={{ background: step === 'slip' ? '#fde68a' : '#4c1d95' }}
-            />
-          </div>
+          {/* Step indicator dots — hidden on the warning gate (it precedes the flow). */}
+          {step !== 'warn' && (
+            <div className="mb-4 flex items-center justify-center gap-1.5">
+              <span
+                className="h-1.5 w-6 rounded-full transition-colors"
+                style={{ background: step === 'qr' ? '#fde68a' : '#4c1d95' }}
+              />
+              <span
+                className="h-1.5 w-6 rounded-full transition-colors"
+                style={{ background: step === 'slip' ? '#fde68a' : '#4c1d95' }}
+              />
+            </div>
+          )}
+
+          {/* ─── Step 0: Warning gate ────────────────────────────────────── */}
+          {step === 'warn' && (
+            <>
+              <div
+                className="mb-5 mt-2 flex flex-col items-center gap-3 rounded-xl px-4 py-5 text-center"
+                style={{ background: 'rgba(220,38,38,0.12)', border: '1.5px solid #f87171' }}
+              >
+                <div
+                  className="flex h-14 w-14 items-center justify-center rounded-full"
+                  style={{ background: 'rgba(220,38,38,0.2)', border: '1px solid #f87171' }}
+                >
+                  <AlertTriangle size={28} style={{ color: '#fca5a5' }} />
+                </div>
+                <p className="text-sm font-bold leading-relaxed" style={{ color: '#fecaca' }}>
+                  {t('deposit.warnLine1')}
+                </p>
+                <p className="text-base font-extrabold leading-relaxed" style={{ color: '#fde68a' }}>
+                  {t('deposit.warnLine2')}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setStep('qr')}
+                className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold transition-opacity hover:opacity-90"
+                style={{
+                  background: 'linear-gradient(135deg, #16a34a, #15803d)',
+                  color: '#fff',
+                  border: '2px solid #4ade80',
+                  boxShadow: '0 0 18px rgba(22,163,74,0.4)',
+                }}
+              >
+                <CheckCircle2 size={16} />
+                {t('deposit.warnUnderstand')}
+              </button>
+            </>
+          )}
 
           {/* ─── Step 1: QR ──────────────────────────────────────────────── */}
           {step === 'qr' && (

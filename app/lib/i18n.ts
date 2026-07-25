@@ -187,6 +187,22 @@ export const STRINGS = {
   "wallet.hideBalance": { lo: "ເຊື່ອງຍອດເງິນ", en: "Hide balance" },
 
   // ─── Deposit modal ───────────────────────────────────────────────────
+  "deposit.warnStepLabel": {
+    lo: "⚠️ ຄຳເຕືອນສຳຄັນ",
+    en: "⚠️ IMPORTANT WARNING",
+  },
+  "deposit.warnLine1": {
+    lo: "ເວລາໂອນເງີນ ຫ້າມຂຽນວ່າ “ປູປາເຕົ້າ” ເດັດຂາດ — ຕ້ອງໃສ່ເປັນ “ຄ່າສິນຄ້າ”.",
+    en: "When transferring, NEVER write “Pupatao” in the note — you must put it as “payment for goods”.",
+  },
+  "deposit.warnLine2": {
+    lo: "ບໍ່ຊັ້ນແອັດມິນຈະບໍ່ອະນຸມັດເດັດຂາດ!",
+    en: "Otherwise the admin will absolutely NOT approve it!",
+  },
+  "deposit.warnUnderstand": {
+    lo: "ຂ້ອຍເຂົ້າໃຈແລ້ວ",
+    en: "I understand",
+  },
   "deposit.step1": {
     lo: "ຂັ້ນຕອນ 1 · ສະແກນເພື່ອຈ່າຍ",
     en: "STEP 1 · SCAN TO PAY",
