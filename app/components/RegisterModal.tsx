@@ -115,11 +115,6 @@ export function RegisterModal({ open, onClose, next, hint, onSwitchToLogin }: Re
           </label>
           <PasswordInput name="password" autoComplete="new-password" required minLength={6} />
 
-          <label className="flex gap-1 text-xs font-semibold" style={{ color: '#c4b5fd' }}>
-            {t('auth.confirmPassword')} <span className='text-rose-500'>*</span>
-          </label>
-          <PasswordInput name="confirmPassword" autoComplete="new-password" required minLength={6} />
-
           {fetcher.data?.error && (
             <div
               className="rounded-lg px-3 py-2 text-xs font-semibold"

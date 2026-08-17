@@ -957,8 +957,7 @@ const TOUR_STEPS: TourStep[] = [
 ]
 
 const CHIP_CONFIG = [
-  { value: 5000, label: '5,000', colors: 'from-gray-600 to-gray-800', border: '#9CA3AF' },
-  { value: 10000, label: '10,000', colors: 'from-blue-500 to-blue-700', border: '#60A5FA' },
+  { value: 10000, label: '10,000', colors: 'from-gray-600 to-gray-800', border: '#9CA3AF' },
   { value: 20000, label: '20,000', colors: 'from-blue-500 to-blue-700', border: '#60A5FA' },
   { value: 50000, label: '50,000', colors: 'from-green-500 to-green-700', border: '#4ADE80' },
   { value: 100000, label: '100,000', colors: 'from-yellow-500 to-yellow-700', border: '#FCD34D' },
@@ -1384,96 +1383,96 @@ export async function loader({ request }: Route.LoaderArgs) {
   // safe (empty) page instead of throwing the customer to the "site is busy"
   // error screen — the game shell loads and realtime fills it in.
   try {
-  // The currently in-flight LIVE round (if any), plus the admin-controlled
-  // stream URL and next schedule from SystemSetting. The stream URL is set
-  // when admin starts a round and cleared when admin clicks "End Live".
-  const { getLiveStreamUrl, getLiveSchedule, getCompetitionConfig, getRecentNotifications } = await import('~/lib/system-settings.server')
-  const [liveRoundRaw, liveStreamUrl, schedule, competitionCfg, notificationsRaw] = await Promise.all([
-    prisma.gameRound.findFirst({
-      where: { mode: 'LIVE', status: { in: ['BETTING', 'LOCKED', 'AWAITING_RESULT'] } },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, status: true, streamUrl: true, bettingClosesAt: true, dice1: true, dice2: true, dice3: true },
-    }),
-    getLiveStreamUrl(),
-    getLiveSchedule(),
-    getCompetitionConfig(),
-    getRecentNotifications(),
-  ])
-  // Fill {{phone_number}}/{{first_name}}/{{last_name}}/{{name}} with this user's
-  // data (empty for anonymous) so the bell shows a personalized, readable message.
-  const notifications = notificationsRaw.map(n => ({
-    id: n.id, title: n.title, createdAt: n.createdAt,
-    message: fillNotificationTemplate(n.message, user),
-  }))
-  const liveRound = liveRoundRaw
-    ? {
-      id: liveRoundRaw.id,
-      status: liveRoundRaw.status as 'BETTING' | 'LOCKED' | 'AWAITING_RESULT',
-      streamUrl: liveRoundRaw.streamUrl,
-      bettingClosesAt: liveRoundRaw.bettingClosesAt?.toISOString() ?? null,
-      dice: [
-        (liveRoundRaw.dice1 as string | null) ?? null,
-        (liveRoundRaw.dice2 as string | null) ?? null,
-        (liveRoundRaw.dice3 as string | null) ?? null,
-      ] as (string | null)[],
-    }
-    : null
-
-  if (!user) {
-    return {
-      selfPlayHistory: [] as SymbolKey[][],
-      liveHistory: [] as SymbolKey[][],
-      liveRound, liveStreamUrl, schedule, notifications,
-      competitionEnabled: competitionCfg.enabled,
-      competitionMenuVisible: competitionCfg.menuVisible,
-      competitionType: competitionCfg.type,
-      isCompetitionParticipant: false,
-      myLiveBets: [] as MyLiveBet[],
-      payoutConfig,
-      hasSeenTour: false,
-      betLocked: false,
-    }
-  }
-
-  // The customer's own bets in the current LIVE round — populates the
-  // "your bets in this round" list shown during the awaiting-result phase.
-  //
-  // Round-level rule for ADMIN_LOCKED users: if ANY of their bets would win more
-  // than 500,000 ₭ profit (return − stake), HIDE ALL of their bets from their own
-  // screen for this round. The bets still exist and settle at resolve (all
-  // refunded if the big bet wins; otherwise settled normally).
-  const { liveBetPotentialReturn, LOCKED_LIVE_VOID_RETURN_MIN } = await import('~/lib/game-logic.server')
-  const _promoSum = process.env.PROMO_SUM === 'true'
-  const _myRawBets = liveRound
-    ? await prisma.bet.findMany({
-      where: { roundId: liveRound.id, userId: user.id },
-      orderBy: { createdAt: 'asc' },
-      select: { id: true, kind: true, amount: true, symbol: true, range: true, pairA: true, pairB: true, exactSum: true },
-    })
-    : []
-  const _hideAllMyBets = user.selfPlayPhase === 'ADMIN_LOCKED' && _myRawBets.some(b =>
-    liveBetPotentialReturn(b, payoutConfig, { promoSum: _promoSum }) - b.amount > LOCKED_LIVE_VOID_RETURN_MIN,
-  )
-  const myLiveBets = _hideAllMyBets
-    ? []
-    : _myRawBets.map(b => ({
-      id: b.id,
-      kind: b.kind as 'SYMBOL' | 'RANGE' | 'PAIR' | 'SUM',
-      amount: b.amount,
-      symbol: b.symbol as string | null,
-      range: b.range as string | null,
-      pairA: b.pairA as string | null,
-      pairB: b.pairB as string | null,
-      exactSum: b.exactSum as number | null,
+    // The currently in-flight LIVE round (if any), plus the admin-controlled
+    // stream URL and next schedule from SystemSetting. The stream URL is set
+    // when admin starts a round and cleared when admin clicks "End Live".
+    const { getLiveStreamUrl, getLiveSchedule, getCompetitionConfig, getRecentNotifications } = await import('~/lib/system-settings.server')
+    const [liveRoundRaw, liveStreamUrl, schedule, competitionCfg, notificationsRaw] = await Promise.all([
+      prisma.gameRound.findFirst({
+        where: { mode: 'LIVE', status: { in: ['BETTING', 'LOCKED', 'AWAITING_RESULT'] } },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, status: true, streamUrl: true, bettingClosesAt: true, dice1: true, dice2: true, dice3: true },
+      }),
+      getLiveStreamUrl(),
+      getLiveSchedule(),
+      getCompetitionConfig(),
+      getRecentNotifications(),
+    ])
+    // Fill {{phone_number}}/{{first_name}}/{{last_name}}/{{name}} with this user's
+    // data (empty for anonymous) so the bell shows a personalized, readable message.
+    const notifications = notificationsRaw.map(n => ({
+      id: n.id, title: n.title, createdAt: n.createdAt,
+      message: fillNotificationTemplate(n.message, user),
     }))
+    const liveRound = liveRoundRaw
+      ? {
+        id: liveRoundRaw.id,
+        status: liveRoundRaw.status as 'BETTING' | 'LOCKED' | 'AWAITING_RESULT',
+        streamUrl: liveRoundRaw.streamUrl,
+        bettingClosesAt: liveRoundRaw.bettingClosesAt?.toISOString() ?? null,
+        dice: [
+          (liveRoundRaw.dice1 as string | null) ?? null,
+          (liveRoundRaw.dice2 as string | null) ?? null,
+          (liveRoundRaw.dice3 as string | null) ?? null,
+        ] as (string | null)[],
+      }
+      : null
 
-  const [selfPlay, live] = await Promise.all([
-    // Self-play history uses an expensive `bets: { some }` relation filter (finds
-    // every round the user ever bet on). With self-play disabled this history is
-    // never shown, so skip the query entirely — it ran on every customer home
-    // load and was hammering the DB for nothing.
-    SELF_PLAY_ENABLED
-      ? prisma.gameRound.findMany({
+    if (!user) {
+      return {
+        selfPlayHistory: [] as SymbolKey[][],
+        liveHistory: [] as SymbolKey[][],
+        liveRound, liveStreamUrl, schedule, notifications,
+        competitionEnabled: competitionCfg.enabled,
+        competitionMenuVisible: competitionCfg.menuVisible,
+        competitionType: competitionCfg.type,
+        isCompetitionParticipant: false,
+        myLiveBets: [] as MyLiveBet[],
+        payoutConfig,
+        hasSeenTour: false,
+        betLocked: false,
+      }
+    }
+
+    // The customer's own bets in the current LIVE round — populates the
+    // "your bets in this round" list shown during the awaiting-result phase.
+    //
+    // Round-level rule for ADMIN_LOCKED users: if ANY of their bets would win more
+    // than 500,000 ₭ profit (return − stake), HIDE ALL of their bets from their own
+    // screen for this round. The bets still exist and settle at resolve (all
+    // refunded if the big bet wins; otherwise settled normally).
+    const { liveBetPotentialReturn, LOCKED_LIVE_VOID_RETURN_MIN } = await import('~/lib/game-logic.server')
+    const _promoSum = process.env.PROMO_SUM === 'true'
+    const _myRawBets = liveRound
+      ? await prisma.bet.findMany({
+        where: { roundId: liveRound.id, userId: user.id },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, kind: true, amount: true, symbol: true, range: true, pairA: true, pairB: true, exactSum: true },
+      })
+      : []
+    const _hideAllMyBets = user.selfPlayPhase === 'ADMIN_LOCKED' && _myRawBets.some(b =>
+      liveBetPotentialReturn(b, payoutConfig, { promoSum: _promoSum }) - b.amount > LOCKED_LIVE_VOID_RETURN_MIN,
+    )
+    const myLiveBets = _hideAllMyBets
+      ? []
+      : _myRawBets.map(b => ({
+        id: b.id,
+        kind: b.kind as 'SYMBOL' | 'RANGE' | 'PAIR' | 'SUM',
+        amount: b.amount,
+        symbol: b.symbol as string | null,
+        range: b.range as string | null,
+        pairA: b.pairA as string | null,
+        pairB: b.pairB as string | null,
+        exactSum: b.exactSum as number | null,
+      }))
+
+    const [selfPlay, live] = await Promise.all([
+      // Self-play history uses an expensive `bets: { some }` relation filter (finds
+      // every round the user ever bet on). With self-play disabled this history is
+      // never shown, so skip the query entirely — it ran on every customer home
+      // load and was hammering the DB for nothing.
+      SELF_PLAY_ENABLED
+        ? prisma.gameRound.findMany({
           where: {
             mode: 'RANDOM',
             status: 'RESOLVED',
@@ -1483,36 +1482,36 @@ export async function loader({ request }: Route.LoaderArgs) {
           take: 30,
           select: { id: true, dice1: true, dice2: true, dice3: true },
         })
-      : Promise.resolve([] as { id: string; dice1: string | null; dice2: string | null; dice3: string | null }[]),
-    prisma.gameRound.findMany({
-      where: { mode: 'LIVE', status: 'RESOLVED' },
-      orderBy: { resolvedAt: 'desc' },
-      take: 30,
-      select: { id: true, dice1: true, dice2: true, dice3: true },
-    }),
-  ])
-  function toLower(r: { dice1: string | null; dice2: string | null; dice3: string | null }): SymbolKey[] | null {
-    if (!r.dice1 || !r.dice2 || !r.dice3) return null
-    return [r.dice1.toLowerCase(), r.dice2.toLowerCase(), r.dice3.toLowerCase()] as SymbolKey[]
-  }
-  return {
-    selfPlayHistory: selfPlay.map(toLower).filter((r): r is SymbolKey[] => r !== null),
-    liveHistory: live.map(toLower).filter((r): r is SymbolKey[] => r !== null),
-    liveRound,
-    liveStreamUrl,
-    schedule,
-    notifications,
-    competitionEnabled: competitionCfg.enabled,
-    competitionMenuVisible: competitionCfg.menuVisible,
-    competitionType: competitionCfg.type,
-    isCompetitionParticipant: competitionCfg.type !== 'DEMO_LIVE' && competitionCfg.enabled
-      ? !!(await prisma.competitionParticipant.findUnique({ where: { userId: user.id } }))
-      : false,
-    myLiveBets,
-    payoutConfig,
-    hasSeenTour: user.hasSeenTour,
-    betLocked: user.betLocked,
-  }
+        : Promise.resolve([] as { id: string; dice1: string | null; dice2: string | null; dice3: string | null }[]),
+      prisma.gameRound.findMany({
+        where: { mode: 'LIVE', status: 'RESOLVED' },
+        orderBy: { resolvedAt: 'desc' },
+        take: 30,
+        select: { id: true, dice1: true, dice2: true, dice3: true },
+      }),
+    ])
+    function toLower(r: { dice1: string | null; dice2: string | null; dice3: string | null }): SymbolKey[] | null {
+      if (!r.dice1 || !r.dice2 || !r.dice3) return null
+      return [r.dice1.toLowerCase(), r.dice2.toLowerCase(), r.dice3.toLowerCase()] as SymbolKey[]
+    }
+    return {
+      selfPlayHistory: selfPlay.map(toLower).filter((r): r is SymbolKey[] => r !== null),
+      liveHistory: live.map(toLower).filter((r): r is SymbolKey[] => r !== null),
+      liveRound,
+      liveStreamUrl,
+      schedule,
+      notifications,
+      competitionEnabled: competitionCfg.enabled,
+      competitionMenuVisible: competitionCfg.menuVisible,
+      competitionType: competitionCfg.type,
+      isCompetitionParticipant: competitionCfg.type !== 'DEMO_LIVE' && competitionCfg.enabled
+        ? !!(await prisma.competitionParticipant.findUnique({ where: { userId: user.id } }))
+        : false,
+      myLiveBets,
+      payoutConfig,
+      hasSeenTour: user.hasSeenTour,
+      betLocked: user.betLocked,
+    }
   } catch (err) {
     console.error('[home loader] failed — rendering safe fallback:', err)
     return {
@@ -2966,24 +2965,24 @@ export default function FishPrawnCrabGame() {
 
             {/* Center: mode selector — hidden when self-play is disabled (live only) */}
             {SELF_PLAY_ENABLED && (
-            <div className="relative z-10">
-              <button
-                onClick={() => { if (modeLocked) return; playClick(); setOverlayModeOpen(v => !v) }}
-                className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold"
-                style={{ background: 'rgba(220,38,38,0.85)', color: '#fff', border: '1px solid #fca5a5' }}
-              >
-                {t('game.modeLive')}
-                {!modeLocked && <ChevronDown size={10} style={{ transform: overlayModeOpen ? 'rotate(180deg)' : 'none' }} />}
-              </button>
-              {overlayModeOpen && !modeLocked && (
-                <PickerDropdown
-                  items={[{ key: 'random', label: t('game.modeSelf') }, { key: 'live', label: t('game.modeLive') }]}
-                  active={mode}
-                  onSelect={key => { selectMode(key as 'random' | 'live'); setOverlayModeOpen(false) }}
-                  onClose={() => setOverlayModeOpen(false)}
-                />
-              )}
-            </div>
+              <div className="relative z-10">
+                <button
+                  onClick={() => { if (modeLocked) return; playClick(); setOverlayModeOpen(v => !v) }}
+                  className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold"
+                  style={{ background: 'rgba(220,38,38,0.85)', color: '#fff', border: '1px solid #fca5a5' }}
+                >
+                  {t('game.modeLive')}
+                  {!modeLocked && <ChevronDown size={10} style={{ transform: overlayModeOpen ? 'rotate(180deg)' : 'none' }} />}
+                </button>
+                {overlayModeOpen && !modeLocked && (
+                  <PickerDropdown
+                    items={[{ key: 'random', label: t('game.modeSelf') }, { key: 'live', label: t('game.modeLive') }]}
+                    active={mode}
+                    onSelect={key => { selectMode(key as 'random' | 'live'); setOverlayModeOpen(false) }}
+                    onClose={() => setOverlayModeOpen(false)}
+                  />
+                )}
+              </div>
             )}
 
             {/* Right: wallet + balance */}
@@ -3590,41 +3589,41 @@ export default function FishPrawnCrabGame() {
             {/* Mode dropdown — Self-play / Live. Hidden when self-play is
                 disabled (the game is live-only, so there's nothing to switch). */}
             {SELF_PLAY_ENABLED && (
-            <div className="relative">
-              <button
-                data-tour="mode-switcher"
-                // While live is on the mode is forced to LIVE (self-play hidden) —
-                // the switcher is locked and won't open a picker.
-                onClick={() => { if (modeLocked) return; playClick(); setModeOpen(v => !v) }}
-                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold"
-                style={{
-                  background: mode === 'live'
-                    ? 'linear-gradient(180deg, #dc2626 0%, #7f1d1d 100%)'
-                    : 'linear-gradient(180deg, #7c3aed 0%, #4c1d95 100%)',
-                  color: '#fff',
-                  border: `1px solid ${mode === 'live' ? '#fca5a5' : '#a78bfa'}`,
-                }}
-                title={t('menu.mode')}
-                aria-haspopup="menu"
-                aria-expanded={modeOpen}
-              >
-                <span>{mode === 'live' ? t('game.modeLive') : t('game.modeSelf')}</span>
-                {!modeLocked && (
-                  <ChevronDown size={12} style={{ transform: modeOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 120ms' }} />
+              <div className="relative">
+                <button
+                  data-tour="mode-switcher"
+                  // While live is on the mode is forced to LIVE (self-play hidden) —
+                  // the switcher is locked and won't open a picker.
+                  onClick={() => { if (modeLocked) return; playClick(); setModeOpen(v => !v) }}
+                  className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold"
+                  style={{
+                    background: mode === 'live'
+                      ? 'linear-gradient(180deg, #dc2626 0%, #7f1d1d 100%)'
+                      : 'linear-gradient(180deg, #7c3aed 0%, #4c1d95 100%)',
+                    color: '#fff',
+                    border: `1px solid ${mode === 'live' ? '#fca5a5' : '#a78bfa'}`,
+                  }}
+                  title={t('menu.mode')}
+                  aria-haspopup="menu"
+                  aria-expanded={modeOpen}
+                >
+                  <span>{mode === 'live' ? t('game.modeLive') : t('game.modeSelf')}</span>
+                  {!modeLocked && (
+                    <ChevronDown size={12} style={{ transform: modeOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 120ms' }} />
+                  )}
+                </button>
+                {modeOpen && !modeLocked && (
+                  <PickerDropdown
+                    items={[
+                      { key: 'random', label: t('game.modeSelf') },
+                      { key: 'live', label: t('game.modeLive') },
+                    ]}
+                    active={mode}
+                    onSelect={key => selectMode(key as 'random' | 'live')}
+                    onClose={() => setModeOpen(false)}
+                  />
                 )}
-              </button>
-              {modeOpen && !modeLocked && (
-                <PickerDropdown
-                  items={[
-                    { key: 'random', label: t('game.modeSelf') },
-                    { key: 'live', label: t('game.modeLive') },
-                  ]}
-                  active={mode}
-                  onSelect={key => selectMode(key as 'random' | 'live')}
-                  onClose={() => setModeOpen(false)}
-                />
-              )}
-            </div>
+              </div>
             )}
             <button
               onClick={() => { playClick(); ensureBgMusic() }}

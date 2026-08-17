@@ -20,14 +20,12 @@ export async function action({ request }: Route.ActionArgs) {
   const formData = await request.formData()
   const tel = String(formData.get('tel') ?? '').trim()
   const password = String(formData.get('password') ?? '')
-  const confirmPassword = String(formData.get('confirmPassword') ?? '')
   const agreedRules = String(formData.get('agreedRules') ?? '') === '1'
   const next = String(formData.get('next') ?? '/') || '/'
 
   if (!tel || !password) return { error: 'Phone number and password are required.' }
   if (!TEL_PATTERN.test(tel)) return { error: 'Enter a valid phone number (8-15 digits, optional +).' }
   if (password.length < 6) return { error: 'Password must be at least 6 characters.' }
-  if (password !== confirmPassword) return { error: 'Passwords do not match.' }
   if (!agreedRules) return { error: 'You must agree to the game rules before registering.' }
 
   try {
