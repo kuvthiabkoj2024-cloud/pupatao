@@ -11,6 +11,7 @@ import { ConfirmDialog } from '~/components/ConfirmDialog'
 import { useT } from '~/lib/use-t'
 import { t as translate } from '~/lib/i18n'
 import { parseLocaleCookie } from '~/lib/i18n'
+import { escapeSearchTerm } from '~/lib/search'
 
 const PAGE_SIZES = [10, 30, 50, 100, 200, 500] as const
 
@@ -45,12 +46,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   const statusParam = url.searchParams.get('status') ?? 'ALL'
   const statusFilter: StatusFilter = statusParam === 'ACTIVE' ? 'ACTIVE' : statusParam === 'SUSPENDED' ? 'SUSPENDED' : 'ALL'
 
+  // Escaped — phone numbers are always "+"-prefixed and `contains` passes
+  // the term straight through as a regex source (see lib/search.ts).
+  const qSafe = escapeSearchTerm(q)
   const where = {
     ...(q ? {
       OR: [
-        { tel: { contains: q, mode: 'insensitive' as const } },
-        { firstName: { contains: q, mode: 'insensitive' as const } },
-        { lastName: { contains: q, mode: 'insensitive' as const } },
+        { tel: { contains: qSafe, mode: 'insensitive' as const } },
+        { firstName: { contains: qSafe, mode: 'insensitive' as const } },
+        { lastName: { contains: qSafe, mode: 'insensitive' as const } },
       ],
     } : {}),
     ...(phase !== 'ALL' ? { selfPlayPhase: phase } : {}),

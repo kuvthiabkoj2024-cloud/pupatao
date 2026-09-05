@@ -89,13 +89,6 @@ export function RegisterModal({ open, onClose, next, hint, onSwitchToLogin }: Re
 
         <fetcher.Form method="post" action="/register" className="flex flex-col gap-3">
           <input type="hidden" name="next" value={nextPath} />
-          {/* Forward ?ref=CODE from the URL so the action can attach
-              referredById. Hidden — link-share only, per spec. */}
-          <input
-            type="hidden"
-            name="ref"
-            value={typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('ref') ?? '' : ''}
-          />
 
           <label className="flex gap-1 text-xs font-semibold" style={{ color: '#c4b5fd' }}>
             {t('auth.phone')} <span className='text-rose-500'>*</span>
@@ -114,6 +107,22 @@ export function RegisterModal({ open, onClose, next, hint, onSwitchToLogin }: Re
             {t('auth.password')} <span className='text-rose-500'>*</span>
           </label>
           <PasswordInput name="password" autoComplete="new-password" required minLength={6} />
+
+          <label className="flex gap-1 text-xs font-semibold" style={{ color: '#c4b5fd' }}>
+            {t('auth.referralCode')}
+          </label>
+          {/* Optional — pre-filled from ?ref=CODE when arriving via a share
+              link, but a user can also type someone's code by hand (or clear
+              it). Same `ref` field the action already reads either way. */}
+          <input
+            name="ref"
+            type="text"
+            autoComplete="off"
+            placeholder={t('auth.referralCodePlaceholder')}
+            defaultValue={typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('ref') ?? '' : ''}
+            className="rounded-lg px-3 py-2.5 text-sm font-semibold uppercase outline-none placeholder:normal-case"
+            style={{ background: '#2d1b4e', color: '#fde68a', border: '2px solid #7c3aed' }}
+          />
 
           {fetcher.data?.error && (
             <div

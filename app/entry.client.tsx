@@ -34,6 +34,28 @@ if (typeof window !== "undefined") {
       }).catch(() => { /* ignore */ })
     }
   } else {
-    registerSW({ immediate: true })
+    // Force-check for a new service worker regularly. Without this, an
+    // already-open PWA session (common on mobile — the app stays resident in
+    // the background instead of fully closing) can go a long time relying
+    // only on the browser's own update heuristic (next navigation, or once
+    // every 24h), so stale clients keep running old bundles — e.g. still
+    // showing removed/old bet-limit options — long after a deploy. Once an
+    // update is found, registerSW's own "activated" handler (registerType:
+    // autoUpdate) reloads the page automatically.
+    registerSW({
+      immediate: true,
+      onRegisteredSW(_url, registration) {
+        if (!registration) return
+        registration.update().catch(() => { /* ignore */ })
+        setInterval(() => {
+          registration.update().catch(() => { /* ignore */ })
+        }, 60_000)
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') {
+            registration.update().catch(() => { /* ignore */ })
+          }
+        })
+      },
+    })
   }
 }

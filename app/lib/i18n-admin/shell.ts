@@ -19,6 +19,8 @@ export const ADMIN_SHELL_STRINGS = {
   "admin.shell.notificationsMobile": { lo: "ແຈ້ງເຕືອນ", en: "Notify" },
   "admin.shell.financial": { lo: "ການເງິນ", en: "Financial" },
   "admin.shell.financialMobile": { lo: "ການເງິນ", en: "Finance" },
+  "admin.shell.referral": { lo: "ແນະນໍາເພື່ອນ", en: "Referral" },
+  "admin.shell.referralMobile": { lo: "ແນະນໍາ", en: "Referral" },
 
   "admin.shell.newCustomerRegistered": { lo: "ມີລູກຄ້າໃໝ່ລົງທະບຽນ", en: "New customer registered" },
   "admin.shell.loading": { lo: "ກຳລັງໂຫຼດ...", en: "Loading..." },

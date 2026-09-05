@@ -2,33 +2,72 @@ import { useEffect, useState } from 'react'
 import { Copy, Check, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useT } from '~/lib/use-t'
+import { t as translateStatic, type Locale, type StringKey } from '~/lib/i18n'
+
+// Copies text to the clipboard, falling back to a hidden textarea for older
+// Safari / insecure contexts where navigator.clipboard is unavailable.
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    let ok = false
+    try { document.execCommand('copy'); ok = true } catch { /* ignore */ }
+    document.body.removeChild(ta)
+    return ok
+  }
+}
 
 export type ReferralListItem = {
   id: string
   tel: string
   name: string | null
   joinedAt: string
-  bonusPaid: boolean
+  totalEarned: number
+}
+
+export type ReferralCampaign = {
+  enabled: boolean
+  percent: number
 }
 
 // Modal opened from the avatar card on /profile. Shows the referral pitch,
 // the share URL, a copy button, a QR code generated from the link, and the
-// list of users this player has invited (with bonus-paid status per referee).
+// list of users this player has invited (with lifetime commission earned
+// per referee — the campaign pays out on every approved deposit, not just
+// the first, for as long as admin leaves it enabled).
 export function ReferralModal({
   open,
   onClose,
   shareUrl,
   code,
   referrals,
+  campaign,
+  locale,
 }: {
   open: boolean
   onClose: () => void
   shareUrl: string
   code: string
   referrals: ReferralListItem[]
+  campaign?: ReferralCampaign
+  // Rendered from root.tsx (outside the routed Outlet) can't reach the
+  // outlet-context-backed useT() hook, so it passes the locale directly.
+  // Call sites inside the Outlet (home/profile) omit this and get the hook.
+  locale?: Locale
 }) {
-  const t = useT()
+  const tHook = useT()
+  const t = locale
+    ? (key: StringKey, vars?: Record<string, string | number>) => translateStatic(locale, key, vars)
+    : tHook
   const [copied, setCopied] = useState(false)
+  const [codeCopied, setCodeCopied] = useState(false)
 
   // Auto-clear the "copied" feedback after a moment.
   useEffect(() => {
@@ -36,29 +75,25 @@ export function ReferralModal({
     const id = setTimeout(() => setCopied(false), 1800)
     return () => clearTimeout(id)
   }, [copied])
+  useEffect(() => {
+    if (!codeCopied) return
+    const id = setTimeout(() => setCodeCopied(false), 1800)
+    return () => clearTimeout(id)
+  }, [codeCopied])
 
   // Reset copied state whenever the modal opens fresh.
   useEffect(() => {
-    if (open) setCopied(false)
+    if (open) { setCopied(false); setCodeCopied(false) }
   }, [open])
 
   if (!open) return null
 
   async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(shareUrl)
-      setCopied(true)
-    } catch {
-      // Older Safari + insecure contexts: fall back to a temp textarea.
-      const ta = document.createElement('textarea')
-      ta.value = shareUrl
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      try { document.execCommand('copy'); setCopied(true) } catch { /* ignore */ }
-      document.body.removeChild(ta)
-    }
+    if (await copyToClipboard(shareUrl)) setCopied(true)
+  }
+
+  async function copyCode() {
+    if (await copyToClipboard(code)) setCodeCopied(true)
   }
 
   return (
@@ -83,7 +118,7 @@ export function ReferralModal({
           onClick={onClose}
           className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full transition-opacity hover:opacity-80"
           style={{ background: '#4c1d95', color: '#e9d5ff', border: '1px solid #7c3aed' }}
-          aria-label="Close"
+          aria-label={t('common.close')}
         >
           <X size={16} />
         </button>
@@ -92,7 +127,9 @@ export function ReferralModal({
           {t('referral.title')}
         </div>
         <p className="mb-5 text-center text-xs" style={{ color: '#c4b5fd' }}>
-          {t('referral.description')}
+          {campaign?.enabled
+            ? t('referral.descriptionCommission', { percent: campaign.percent })
+            : t('referral.description')}
         </p>
 
         {/* QR code — uses brand-friendly colors against a white tile so it
@@ -107,12 +144,24 @@ export function ReferralModal({
           />
         </div>
 
-        {/* Code chip — shown above the link as a fallback for typed entry. */}
+        {/* Code chip — shown above the link as a fallback for typed entry.
+            Also copyable on its own, for sharing just the code. */}
         <div className="mb-3 flex items-center justify-center gap-2 text-[10px] font-bold " style={{ color: '#a78bfa' }}>
           <span>{t('referral.codeLabel')}</span>
-          <span className="rounded-md px-2 py-0.5 text-sm" style={{ background: '#2d1b4e', color: '#fde68a', border: '1px solid #4c1d95' }}>
+          <button
+            type="button"
+            onClick={copyCode}
+            className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-sm transition-opacity hover:opacity-80"
+            style={{
+              background: '#2d1b4e',
+              color: codeCopied ? '#4ade80' : '#fde68a',
+              border: `1px solid ${codeCopied ? '#4ade80' : '#4c1d95'}`,
+            }}
+            aria-label={t('referral.copy')}
+          >
             {code}
-          </span>
+            {codeCopied ? <Check size={12} /> : <Copy size={12} />}
+          </button>
         </div>
 
         {/* Share URL + copy button. */}
@@ -193,12 +242,12 @@ export function ReferralsList({ referrals }: { referrals: ReferralListItem[] }) 
               <span
                 className="shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold "
                 style={
-                  r.bonusPaid
+                  r.totalEarned > 0
                     ? { background: 'rgba(22,163,74,0.25)', color: '#4ade80', border: '1px solid #4ade80' }
                     : { background: 'rgba(234,179,8,0.18)', color: '#fde68a', border: '1px solid #fbbf24' }
                 }
               >
-                {r.bonusPaid ? t('referral.bonusPaid') : t('referral.pending')}
+                {r.totalEarned > 0 ? `+${r.totalEarned.toLocaleString()} ₭` : t('referral.pending')}
               </span>
             </li>
           ))}

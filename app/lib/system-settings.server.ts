@@ -12,6 +12,10 @@
 //   liveScheduleStart — ISO UTC string (absent = no schedule)
 //   liveScheduleEnd   — ISO UTC string (absent = no schedule)
 //     Start/end of the next scheduled live broadcast in UTC. Display in GMT+7.
+//   referralCommissionEnabled — 'true' | 'false'
+//   referralCommissionPercent — integer string, e.g. '10'
+//     While enabled, a referrer earns `percent`% of every approved deposit
+//     their referred users make, recurring, until admin disables it.
 
 import { prisma } from './prisma.server'
 
@@ -57,6 +61,8 @@ export interface CompetitionWinner {
   profile: string | null
   demoBalance: number
 }
+export const REFERRAL_ENABLED_KEY       = 'referralCommissionEnabled'
+export const REFERRAL_PERCENT_KEY       = 'referralCommissionPercent'
 export const ANNOUNCEMENT_KEY           = 'activeAnnouncement'
 export const LIVE_STREAM_URL_KEY        = 'liveStreamUrl'
 export const LIVE_SCHEDULE_START_KEY    = 'liveScheduleStart'
@@ -233,6 +239,65 @@ export async function setAnnouncement(message: string | null, adminId: string): 
   })
   ssInvalidate('announcement')
   return announcement
+}
+
+// ─── Referral commission campaign ────────────────────────────────────────────
+// Admin-configurable: while `enabled`, a referrer earns `percent`% of EVERY
+// approved deposit their referred users make (not just the first one), for
+// as long as the campaign stays on. Applied in admin.transactions.tsx at
+// deposit-approval time. Disabling stops future payouts; past ones are kept.
+
+export interface ReferralConfig {
+  enabled: boolean
+  percent: number // e.g. 10 means 10%
+}
+
+async function fetchReferralConfig(): Promise<ReferralConfig> {
+  try {
+    const settings = await prisma.systemSetting.findMany({
+      where: { key: { in: [REFERRAL_ENABLED_KEY, REFERRAL_PERCENT_KEY] } },
+      select: { key: true, value: true },
+    })
+    const m = new Map(settings.map(s => [s.key, s.value]))
+    const enabled = m.get(REFERRAL_ENABLED_KEY) === 'true'
+    const percent = Number(m.get(REFERRAL_PERCENT_KEY) ?? 0)
+    return { enabled, percent: Number.isFinite(percent) && percent > 0 ? percent : 0 }
+  } catch {
+    return { enabled: false, percent: 0 } // fail closed — never pay out on a DB hiccup
+  }
+}
+
+// Cached (5s) — cheap enough for the root loader to call on every page view.
+// A toggle only invalidates the cache on the SERVERLESS INSTANCE that ran the
+// write; on Vercel a different instance can keep serving a stale value for up
+// to the full TTL. Fine for a promo banner, but NOT for anything that decides
+// a real payout — use getReferralConfigFresh() for that.
+export async function getReferralConfig(): Promise<ReferralConfig> {
+  return ssCached('referralConfig', 5000, fetchReferralConfig)
+}
+
+// Uncached — always reads the current DB value. Deposit-approval is a rare,
+// human-paced admin action (not a hot path), so the extra round-trip is cheap
+// insurance against paying (or skipping) a referral commission based on a
+// stale cache read from another instance.
+export async function getReferralConfigFresh(): Promise<ReferralConfig> {
+  return fetchReferralConfig()
+}
+
+export async function setReferralConfig(config: { enabled: boolean; percent: number }, adminId: string): Promise<void> {
+  await Promise.all([
+    prisma.systemSetting.upsert({
+      where: { key: REFERRAL_ENABLED_KEY },
+      create: { key: REFERRAL_ENABLED_KEY, value: String(config.enabled), updatedBy: adminId },
+      update: { value: String(config.enabled), updatedBy: adminId },
+    }),
+    prisma.systemSetting.upsert({
+      where: { key: REFERRAL_PERCENT_KEY },
+      create: { key: REFERRAL_PERCENT_KEY, value: String(config.percent), updatedBy: adminId },
+      update: { value: String(config.percent), updatedBy: adminId },
+    }),
+  ])
+  ssInvalidate('referralConfig')
 }
 
 // ─── Competition ─────────────────────────────────────────────────────────────

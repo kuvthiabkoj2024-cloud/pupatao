@@ -11,6 +11,8 @@ import { usePusherEvent } from '~/hooks/use-pusher'
 import { ConfirmDialog } from '~/components/ConfirmDialog'
 import { isValidRejectReason, rejectReasonsFor } from '~/lib/reject-reasons'
 import { withdrawFee } from '~/lib/withdraw-fee'
+import { getReferralConfigFresh } from '~/lib/system-settings.server'
+import { escapeSearchTerm } from '~/lib/search'
 import { useT, useLocale } from '~/lib/use-t'
 import { t as translate, parseLocaleCookie, type StringKey } from '~/lib/i18n'
 
@@ -49,9 +51,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   const q = url.searchParams.get('q')?.trim() ?? ''
 
   // Pre-fetch user IDs matching the phone search to avoid expensive $lookup joins.
+  // Escaped — phone numbers are always "+"-prefixed and `contains` passes the
+  // term straight through as a regex source (see lib/search.ts).
   const matchedUserIds = q
     ? await prisma.user.findMany({
-        where: { tel: { contains: q, mode: 'insensitive' as const } },
+        where: { tel: { contains: escapeSearchTerm(q), mode: 'insensitive' as const } },
         select: { id: true },
       }).then(us => us.map(u => u.id))
     : null
@@ -370,6 +374,14 @@ export async function action({ request }: Route.ActionArgs) {
       amountAdjusted = parsed !== tx.amount
     }
 
+    // Referral commission config — read fresh (UNCACHED) outside the
+    // transaction. Deciding a real payout off the 5s in-memory cache
+    // (getReferralConfig) risks a different serverless instance still
+    // seeing "disabled" for a few seconds right after admin turns the
+    // campaign on, silently skipping that commission forever. This action
+    // is rare/human-paced, so the extra DB round-trip is cheap insurance.
+    const referralConfig = tx.type === 'DEPOSIT' ? await getReferralConfigFresh() : { enabled: false, percent: 0 }
+
     const result = await prisma.$transaction(async db => {
       const wallet = await db.wallet.findUnique({ where: { id: tx.walletId } })
       if (!wallet) throw new Error(translate(locale, 'admin.transactions.error.walletNotFound'))
@@ -412,7 +424,7 @@ export async function action({ request }: Route.ActionArgs) {
         },
       })
 
-      const bonus = { promo: 0, promoNewBalance: 0, referrer: { userId: '', amount: 0, newRealBalance: 0 } }
+      const bonus = { promo: 0, promoNewBalance: 0, referrer: { userId: '', amount: 0, newRealBalance: 0, refereeTel: '' } }
       // Capture pre-deposit balance so the phase reset (run after this
       // transaction) knows whether the wallet was nearly empty.
       const walletBalanceBefore = wallet.balance
@@ -421,7 +433,7 @@ export async function action({ request }: Route.ActionArgs) {
       if (tx.type === 'DEPOSIT') {
         const user = await db.user.findUnique({
           where: { id: tx.userId },
-          select: { id: true, firstTopupApprovedAt: true, referredById: true },
+          select: { id: true, tel: true, firstTopupApprovedAt: true, referredById: true },
         })
         const isFirstApproval = user && !user.firstTopupApprovedAt
         if (isFirstApproval) {
@@ -448,22 +460,36 @@ export async function action({ request }: Route.ActionArgs) {
               bonus.promoNewBalance = newPromo
             }
           }
-          if (user.referredById) {
+        }
+
+        // Referral commission — while the campaign is enabled, the referrer
+        // earns `percent`% of EVERY approved deposit their referee makes (not
+        // just the first), for as long as admin leaves the campaign on.
+        if (user?.referredById && referralConfig.enabled && referralConfig.percent > 0) {
+          const commission = Math.floor(effectiveAmount * referralConfig.percent / 100)
+          if (commission > 0) {
             const refReal = await db.wallet.findUnique({
               where: { userId_type: { userId: user.referredById, type: 'REAL' } },
             })
             if (refReal) {
-              const refNew = refReal.balance + 10_000
+              const refNew = refReal.balance + commission
               await db.wallet.update({ where: { id: refReal.id }, data: { balance: refNew, version: { increment: 1 } } })
               await db.transaction.create({
                 data: {
                   userId: user.referredById, walletId: refReal.id, type: 'REFERRAL_BONUS',
-                  amount: 10_000, balanceBefore: refReal.balance, balanceAfter: refNew,
+                  amount: commission, balanceBefore: refReal.balance, balanceAfter: refNew,
                   status: 'COMPLETED', targetUserId: tx.userId, idempotencyKey: crypto.randomUUID(),
-                  note: `Referral bonus — referee ${tx.userId.slice(-6)} first-topup approved`,
+                  // Customer-facing (Reward tab) — Lao, matching the default
+                  // customer locale, with the referee's phone number so the
+                  // referrer knows exactly who earned them this commission.
+                  // Kept short — the row truncates to one line, and the
+                  // deposit amount itself is a less essential detail than
+                  // who it was and what percent (the earned amount is
+                  // already shown as the row's own +amount).
+                  note: `ຄອມມິຊັນແນະນຳ ${referralConfig.percent}% — ${user.tel}`,
                 },
               })
-              bonus.referrer = { userId: user.referredById, amount: 10_000, newRealBalance: refNew }
+              bonus.referrer = { userId: user.referredById, amount: commission, newRealBalance: refNew, refereeTel: user.tel }
             }
           }
         }
@@ -509,7 +535,7 @@ export async function action({ request }: Route.ActionArgs) {
       notifyUser(bonus.referrer.userId, 'transaction:updated', {
         id: `referral-bonus:${updated.id}`, status: 'COMPLETED', type: 'DEPOSIT',
         amount: bonus.referrer.amount, balanceAfter: bonus.referrer.newRealBalance,
-        note: `Referral bonus +${bonus.referrer.amount.toLocaleString()} ₭ — your referee just joined`,
+        note: `ຄອມມິຊັນ +${bonus.referrer.amount.toLocaleString()} ₭ — ${bonus.referrer.refereeTel} ຝາກເງິນສຳເລັດ`,
       })
     }
     return { ok: true }

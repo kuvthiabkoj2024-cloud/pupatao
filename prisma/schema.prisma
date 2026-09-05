@@ -96,7 +96,9 @@ model User {
   referrals    User[]  @relation("UserReferrals")
 
   // Set the first time the admin approves any DEPOSIT for this user. Drives
-  // both the new-user PROMO tier bonus and the referrer's REAL referral bonus.
+  // the new-user PROMO tier bonus (one-time). The referrer's REAL commission
+  // (see REFERRAL_BONUS) is separate — it pays on EVERY approved deposit,
+  // controlled by the referralCommissionEnabled/Percent SystemSetting.
   firstTopupApprovedAt DateTime?
 
   wallets              Wallet[]
@@ -404,7 +406,7 @@ enum TransactionType {
   DEMO_RESET // audit entry when demo wallet reset to 1M (not strictly a balance op)
   ADJUSTMENT // manual admin correction (+ or - per sign of `amount` if you relax the rule)
   PROMO_BONUS // first-topup tier bonus credited to PROMO wallet
-  REFERRAL_BONUS // 10k credit to a referrer's REAL wallet when their referee's first topup is approved
+  REFERRAL_BONUS // recurring commission (admin-set %) credited to a referrer's REAL wallet on every approved deposit made by a referred user, while the referral campaign is enabled
   SYSTEM_REWARD  // automated promotion bonus (win streak, triple, etc.) credited to REAL wallet
 }
 

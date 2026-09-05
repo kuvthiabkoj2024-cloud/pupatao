@@ -9,6 +9,7 @@ import { ADMIN_CHANNEL, type BetPlacedPayload, type RoundResolvedPayload } from 
 import { usePusherEvent } from '~/hooks/use-pusher'
 import { useT } from '~/lib/use-t'
 import { t as translate, parseLocaleCookie, type StringKey } from '~/lib/i18n'
+import { escapeSearchTerm } from '~/lib/search'
 
 const PAGE_SIZES = [10, 30, 50, 100, 200, 500] as const
 const WALLET_TABS: ReadonlyArray<Extract<WalletType, 'REAL' | 'DEMO'>> = ['REAL', 'DEMO']
@@ -77,9 +78,11 @@ export async function loader({ request }: Route.LoaderArgs) {
       ? prisma.gameRound.findMany({ where: { mode: mode as 'RANDOM' | 'LIVE' }, select: { id: true } })
           .then(rs => rs.map(r => r.id))
       : Promise.resolve(null),
-    // User IDs matching phone search — only when q is set
+    // User IDs matching phone search — only when q is set. Escaped — phone
+    // numbers are always "+"-prefixed and `contains` passes the term
+    // straight through as a regex source (see lib/search.ts).
     q
-      ? prisma.user.findMany({ where: { tel: { contains: q, mode: 'insensitive' } }, select: { id: true } })
+      ? prisma.user.findMany({ where: { tel: { contains: escapeSearchTerm(q), mode: 'insensitive' } }, select: { id: true } })
           .then(us => us.map(u => u.id))
       : Promise.resolve(null),
     getSleepMode(),

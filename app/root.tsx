@@ -5,14 +5,16 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useFetcher,
   useRouteLoaderData,
   type ShouldRevalidateFunctionArgs,
 } from "react-router"
 import { Toaster } from "sonner"
 import { Trophy, X } from "lucide-react"
 import type { Route } from "./+types/root"
-import { DEFAULT_LOCALE, parseLocaleCookie, type Locale } from "./lib/i18n"
+import { DEFAULT_LOCALE, parseLocaleCookie, t as translate, type Locale } from "./lib/i18n"
 import { GlobalNavLoader } from "./components/GlobalNavLoader"
+import { ReferralModal, type ReferralCampaign, type ReferralListItem } from "./components/ReferralModal"
 import "./app.css"
 
 // Serialized shape of the authed user that's safe to pass to the browser.
@@ -38,16 +40,18 @@ export async function loader({ request }: Route.LoaderArgs) {
   const locale: Locale = parseLocaleCookie(request.headers.get('cookie'))
 
   // Lazy-import so Vite doesn't eagerly pull Prisma into client module graph.
-  const { getCurrentUser } = await import("./lib/auth.server")
-  let user: Awaited<ReturnType<typeof getCurrentUser>> = null
+  const { getCurrentUserWithSession } = await import("./lib/auth.server")
+  let session: Awaited<ReturnType<typeof getCurrentUserWithSession>> = null
   try {
-    user = await getCurrentUser(request)
+    session = await getCurrentUserWithSession(request)
   } catch (err) {
     // DB hiccup — render the page as anonymous rather than throwing the whole
     // root loader, which would otherwise drop the user into an error boundary
     // on every refresh.
-    console.error('[root loader] getCurrentUser failed:', err)
+    console.error('[root loader] getCurrentUserWithSession failed:', err)
   }
+  const user = session?.user ?? null
+  const sessionId = session?.sessionId ?? null
 
   let wallets: SessionWallets = null
   if (user) {
@@ -82,13 +86,15 @@ export async function loader({ request }: Route.LoaderArgs) {
       role: user.role,
     }
     : null
-  const { getCompetitionConfig } = await import('./lib/system-settings.server')
-  const competition = await getCompetitionConfig()
+  const { getCompetitionConfig, getReferralConfig } = await import('./lib/system-settings.server')
+  const [competition, referral] = await Promise.all([getCompetitionConfig(), getReferralConfig()])
 
   return {
     user: sessionUser, wallets, locale,
+    sessionId, // ties the referral-campaign modal's dismissal to THIS login
     competitionEnabled: competition.enabled,    // for banner (only show while running)
     competitionMenuVisible: competition.menuVisible, // for menu item visibility
+    referralCampaign: { enabled: referral.enabled, percent: referral.percent },
   }
 }
 
@@ -171,6 +177,13 @@ export default function App({ loaderData }: Route.ComponentProps) {
       {loaderData.user && loaderData.competitionEnabled && (
         <CompetitionBanner />
       )}
+      {loaderData.user && loaderData.sessionId && loaderData.referralCampaign.enabled && (
+        <CampaignModal
+          sessionId={loaderData.sessionId}
+          percent={loaderData.referralCampaign.percent}
+          locale={loaderData.locale}
+        />
+      )}
       <PWAInstallPrompt />
       <Outlet
         context={{
@@ -232,6 +245,112 @@ function CompetitionBanner() {
         </button>
       </div>
     </div>
+  )
+}
+
+// Referral-campaign promo modal — shown once per LOGIN (not per page refresh)
+// while admin has the referral commission campaign enabled. `sessionId` comes
+// from the root loader and only changes on an actual new login (a fresh
+// Session row — see getCurrentUserWithSession in auth.server.ts), so
+// dismissal is remembered in localStorage keyed to it: refreshing the page
+// keeps the same sessionId and stays dismissed, but the next real login gets
+// a new id and shows the modal again. Rendered directly in App (not inside
+// the Outlet), so it can't use useT()/useOutletContext — locale comes in as
+// a prop and strings are translated directly via `t()`.
+const CAMPAIGN_MODAL_SEEN_KEY = 'pupatao_campaign_modal_seen_for_session'
+
+type ReferralApiResponse = { code: string; shareUrl: string; referrals: ReferralListItem[]; campaign: ReferralCampaign }
+
+function CampaignModal({ sessionId, percent, locale }: { sessionId: string; percent: number; locale: Locale }) {
+  const [visible, setVisible] = useState(false)
+  const [referralOpen, setReferralOpen] = useState(false)
+  const referralFetcher = useFetcher<ReferralApiResponse>()
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(CAMPAIGN_MODAL_SEEN_KEY) === sessionId) return
+    } catch { /* localStorage unavailable — fail open and show it */ }
+    setVisible(true)
+  }, [sessionId])
+
+  function dismiss() {
+    try { localStorage.setItem(CAMPAIGN_MODAL_SEEN_KEY, sessionId) } catch { /* ignore */ }
+    setVisible(false)
+  }
+
+  // "Invite now" — dismiss the promo card and open the referral modal
+  // in place (share link/code + QR + invite list), no page navigation.
+  function openReferral() {
+    dismiss()
+    if (!referralFetcher.data && referralFetcher.state === 'idle') referralFetcher.load('/api/referral')
+    setReferralOpen(true)
+  }
+
+  return (
+    <>
+      {visible && (
+        <div
+          className="fixed inset-0 z-[500] flex items-center justify-center p-4"
+          style={{ background: 'rgba(15,0,32,0.85)' }}
+          onClick={dismiss}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="relative w-full max-w-sm rounded-2xl p-6 text-center animate-in fade-in zoom-in-95 duration-200"
+            style={{
+              background: 'linear-gradient(135deg, #3b0764, #1e0040)',
+              border: '2px solid #fbbf24',
+              boxShadow: '0 10px 40px rgba(251,191,36,0.35)',
+            }}
+          >
+            <button
+              type="button"
+              onClick={dismiss}
+              className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full transition-opacity hover:opacity-80"
+              style={{ background: '#4c1d95', color: '#e9d5ff', border: '1px solid #7c3aed' }}
+              aria-label={translate(locale, 'common.close')}
+            >
+              <X size={16} />
+            </button>
+
+            <div
+              className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full text-3xl"
+              style={{ background: 'rgba(251,191,36,0.15)', border: '2px solid #fbbf24' }}
+            >
+              🎁
+            </div>
+            <h2 className="mb-2 text-lg font-bold" style={{ color: '#fde68a' }}>
+              {translate(locale, 'campaign.modal.title')}
+            </h2>
+            <p className="mb-5 text-sm" style={{ color: '#e9d5ff' }}>
+              {translate(locale, 'campaign.modal.body', { percent })}
+            </p>
+            <button
+              type="button"
+              onClick={openReferral}
+              className="block w-full rounded-xl py-3 text-sm font-bold"
+              style={{ background: 'linear-gradient(135deg,#ca8a04,#78350f)', color: '#fff', border: '1px solid #fbbf24' }}
+            >
+              {translate(locale, 'campaign.modal.cta')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {referralOpen && referralFetcher.data && (
+        <ReferralModal
+          open={referralOpen}
+          onClose={() => setReferralOpen(false)}
+          shareUrl={referralFetcher.data.shareUrl}
+          code={referralFetcher.data.code}
+          referrals={referralFetcher.data.referrals}
+          campaign={referralFetcher.data.campaign}
+          locale={locale}
+        />
+      )}
+    </>
   )
 }
 

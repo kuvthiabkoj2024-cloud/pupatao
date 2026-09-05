@@ -7,7 +7,7 @@ import type { Route } from './+types/home'
 import { LoginModal } from '~/components/LoginModal'
 import { JoinGroupModal } from '~/components/JoinGroupModal'
 import { PushAutoEnable } from '~/components/PushAutoEnable'
-import { ReferralModal, type ReferralListItem } from '~/components/ReferralModal'
+import { ReferralModal, type ReferralListItem, type ReferralCampaign } from '~/components/ReferralModal'
 import { RegisterModal } from '~/components/RegisterModal'
 import { FeatureTour, type TourStep } from '~/components/FeatureTour'
 import { useUser } from '~/hooks/use-user'
@@ -1566,7 +1566,7 @@ export default function FishPrawnCrabGame() {
   // Referral modal, opened from the live screen. Data is lazy-loaded on first
   // open so the home loader stays light. Anonymous users go to register first.
   const [referralOpen, setReferralOpen] = useState(false)
-  const referralFetcher = useFetcher<{ code: string; shareUrl: string; referrals: ReferralListItem[] }>()
+  const referralFetcher = useFetcher<{ code: string; shareUrl: string; referrals: ReferralListItem[]; campaign: ReferralCampaign }>()
   const openReferral = useCallback(() => {
     if (isAnonymous) { navigate('/register'); return }
     if (!referralFetcher.data && referralFetcher.state === 'idle') referralFetcher.load('/api/referral')
@@ -4644,6 +4644,7 @@ export default function FishPrawnCrabGame() {
           shareUrl={referralFetcher.data.shareUrl}
           code={referralFetcher.data.code}
           referrals={referralFetcher.data.referrals}
+          campaign={referralFetcher.data.campaign}
         />
       )}
 

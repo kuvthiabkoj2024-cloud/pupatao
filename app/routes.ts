@@ -46,6 +46,7 @@ export default [
     route("live", "routes/admin.live.tsx"),
     route("competition", "routes/admin.competition.tsx"),
     route("competition/:id", "routes/admin.competition.$id.tsx"),
+    route("referral", "routes/admin.referral.tsx"),
     route("notifications", "routes/admin.notifications.tsx"),
     route("financial", "routes/admin.financial.tsx"),
   ]),

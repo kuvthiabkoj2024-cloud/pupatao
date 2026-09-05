@@ -23,6 +23,7 @@ import { ADMIN_COMPETITION_STRINGS } from "./i18n-admin/competition";
 import { ADMIN_FINANCIAL_STRINGS } from "./i18n-admin/financial";
 import { ADMIN_LIVE_STRINGS } from "./i18n-admin/live";
 import { ADMIN_NOTIFICATIONS_STRINGS } from "./i18n-admin/notifications";
+import { ADMIN_REFERRAL_STRINGS } from "./i18n-admin/referral";
 
 export type Locale = "lo" | "en";
 export const DEFAULT_LOCALE: Locale = "lo";
@@ -57,6 +58,7 @@ export const STRINGS = {
   ...ADMIN_FINANCIAL_STRINGS,
   ...ADMIN_LIVE_STRINGS,
   ...ADMIN_NOTIFICATIONS_STRINGS,
+  ...ADMIN_REFERRAL_STRINGS,
 
   // ─── Common ──────────────────────────────────────────────────────────
   "common.cancel": { lo: "ຍົກເລີກ", en: "Cancel" },
@@ -92,6 +94,8 @@ export const STRINGS = {
   "auth.phone": { lo: "ເບີໂທລະສັບ", en: "Phone number" },
   "auth.password": { lo: "ລະຫັດຜ່ານ", en: "Password" },
   "auth.confirmPassword": { lo: "ຢືນຢັນລະຫັດຜ່ານ", en: "Confirm password" },
+  "auth.referralCode": { lo: "ລະຫັດແນະນໍາ (ບໍ່ບັງຄັບ)", en: "Referral code (optional)" },
+  "auth.referralCodePlaceholder": { lo: "ໃສ່ລະຫັດແນະນໍາ ຖ້າມີ", en: "Enter a code if you have one" },
   "auth.noAccount": { lo: "ຍັງບໍ່ມີບັນຊີ?", en: "No account?" },
   "auth.alreadyHaveAccount": {
     lo: "ມີບັນຊີແລ້ວ?",
@@ -475,8 +479,12 @@ export const STRINGS = {
   "referral.invite": { lo: "ແນະນໍາ", en: "Invite" },
   "referral.shareLink": { lo: "ແຊຣລິ້ງ", en: "Share link" },
   "referral.description": {
-    lo: "ຮັບ 10,000 ກີບ ຕໍ່ຜູ້ຖືກແນະນໍາ ທີ່ລົງທະບຽນ ແລະ ຝາກຄັ້ງທຳອິດສຳເລັດ.",
-    en: "Got 10,000 Kip per referred friend who registers and completes their first top-up.",
+    lo: "ແບ່ງປັນລິ້ງແນະນໍາຂອງທ່ານໃຫ້ໝູ່. ເມື່ອແຄມເປນຄອມມິຊັນເປີດໃຊ້, ທ່ານຈະໄດ້ຮັບສ່ວນແບ່ງທຸກຄັ້ງທີ່ໝູ່ຝາກເງິນ.",
+    en: "Share your referral link with friends. When the commission campaign is active, you'll earn a share of every deposit they make.",
+  },
+  "referral.descriptionCommission": {
+    lo: "ຮັບ {percent}% ຈາກທຸກຄັ້ງທີ່ໝູ່ຂອງທ່ານຝາກເງິນສຳເລັດ — ຮັບຕໍ່ເນື່ອງໄປເລື່ອຍໆ!",
+    en: "Earn {percent}% of every deposit your invited friends make — recurring, forever!",
   },
   "referral.codeLabel": { lo: "ລະຫັດແນະນໍາ", en: "Code" },
   "referral.copy": { lo: "ສຳເນົາ", en: "Copy" },
@@ -487,11 +495,19 @@ export const STRINGS = {
     en: "PEOPLE YOU INVITED",
   },
   "referral.empty": {
-    lo: "ຍັງບໍ່ມີຄົນເຂົ້າຮ່ວມ. ແບ່ງປັນລະຫັດຂອງທ່ານເພື່ອຮັບ 10,000 ກີບ ຕໍ່ຄົນ.",
-    en: "No invites yet. Share your code to earn 10,000 ₭ per friend.",
+    lo: "ຍັງບໍ່ມີຄົນເຂົ້າຮ່ວມ. ແບ່ງປັນລະຫັດຂອງທ່ານໃຫ້ໝູ່ເພື່ອເລີ່ມຮັບຄອມມິຊັນ.",
+    en: "No invites yet. Share your code with friends to start earning commission.",
   },
   "referral.bonusPaid": { lo: "ຮັບໂບນັດແລ້ວ", en: "BONUS PAID" },
   "referral.pending": { lo: "ລໍຖ້າຝາກຄັ້ງທຳອິດ", en: "AWAITING TOPUP" },
+
+  // ─── Referral-campaign promo modal (shown once per login, root.tsx) ───
+  "campaign.modal.title": { lo: "ໂປຣໂມຊັນແນະນໍາເພື່ອນ!", en: "Referral Campaign!" },
+  "campaign.modal.body": {
+    lo: "ຮັບ {percent}% ຄອມມິຊັນ ຈາກທຸກຄັ້ງທີ່ໝູ່ຂອງທ່ານຝາກເງິນສຳເລັດ — ຮັບຕໍ່ເນື່ອງໄປເລື່ອຍໆ! ແບ່ງປັນລິ້ງແນະນໍາຂອງທ່ານດຽວນີ້.",
+    en: "Earn {percent}% commission on every deposit your invited friends make — recurring, forever! Share your referral link now.",
+  },
+  "campaign.modal.cta": { lo: "ແບ່ງປັນລິ້ງແນະນໍາ", en: "Share my referral link" },
 
   // ─── Symbol names ────────────────────────────────────────────────────
   "symbol.crab": { lo: "ປູ", en: "Crab" },

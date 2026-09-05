@@ -7,6 +7,7 @@ import { requireRole } from '~/lib/admin-auth.server'
 import { prisma } from '~/lib/prisma.server'
 import { useT } from '~/lib/use-t'
 import type { StringKey } from '~/lib/i18n'
+import { escapeSearchTerm } from '~/lib/search'
 
 const PAGE_SIZES = [10, 30, 50, 100, 200, 500] as const
 
@@ -24,12 +25,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   const pageSizeRaw = parseInt(url.searchParams.get('pageSize') ?? '30', 10)
   const pageSize = (PAGE_SIZES as readonly number[]).includes(pageSizeRaw) ? pageSizeRaw : 30
 
+  // Escaped — phone numbers are always "+"-prefixed and `contains` passes
+  // the term straight through as a regex source (see lib/search.ts).
+  const qSafe = escapeSearchTerm(q)
   const where = q
     ? {
       OR: [
-        { tel: { contains: q, mode: 'insensitive' as const } },
-        { firstName: { contains: q, mode: 'insensitive' as const } },
-        { lastName: { contains: q, mode: 'insensitive' as const } },
+        { tel: { contains: qSafe, mode: 'insensitive' as const } },
+        { firstName: { contains: qSafe, mode: 'insensitive' as const } },
+        { lastName: { contains: qSafe, mode: 'insensitive' as const } },
       ],
     }
     : {}

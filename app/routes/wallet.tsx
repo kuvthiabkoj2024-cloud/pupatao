@@ -20,7 +20,7 @@ import { withdrawFee, MAX_WITHDRAW_PER_DAY } from '~/lib/withdraw-fee'
 import { useT } from '~/lib/use-t'
 
 const HIDDEN = '••••••'
-const MIN_DEPOSIT = 5_000
+const MIN_DEPOSIT = 10_000
 const MAX_DEPOSIT = 10_000_000
 const MIN_WITHDRAW = 30_000
 const MAX_WITHDRAW = 10_000_000
@@ -33,7 +33,7 @@ const PAGE_SIZE = 200
 const VISIBLE_INITIAL = 20
 const VISIBLE_STEP = 20
 
-const DEPOSIT_AMOUNTS = [5_000, 10_000, 50_000, 100_000, 500_000, 1_000_000]
+const DEPOSIT_AMOUNTS = [10_000, 50_000, 100_000, 500_000, 1_000_000]
 const WITHDRAW_AMOUNTS = [30_000, 50_000, 100_000, 200_000, 500_000, 1_000_000]
 const TRANSFER_AMOUNTS = [20_000, 50_000, 100_000, 200_000, 500_000, 1_000_000]
 
@@ -125,7 +125,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       take: PAGE_SIZE,
     }),
     prisma.transaction.findMany({
-      where: { walletId: wallet.id, type: 'SYSTEM_REWARD' },
+      where: { walletId: wallet.id, type: { in: ['SYSTEM_REWARD', 'REFERRAL_BONUS'] } },
       orderBy: { createdAt: 'desc' },
       take: PAGE_SIZE,
     }),
@@ -916,11 +916,16 @@ export default function WalletPage() {
         {/* ─── Deposit form ────────────────────────────────────────────── */}
         {tab === 'deposit' && (
           <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm"
+              style={{ background: 'rgba(180,83,9,0.15)', border: '1px solid rgba(252,211,77,0.4)', color: '#fcd34d' }}>
+              <span className="text-base">⚠️</span>
+              <span>ຍອດຝາກຂັ້ນຕ່ຳ <strong>{MIN_DEPOSIT.toLocaleString()} ₭</strong></span>
+            </div>
             <QuickAmounts amounts={DEPOSIT_AMOUNTS} value={amount} onSelect={setAmount} />
             <CustomAmountInput value={amount} onChange={setAmount} />
             <button
               onClick={openDeposit}
-              disabled={!amount}
+              disabled={!amount || parseInt(amount, 10) < MIN_DEPOSIT}
               className="w-full rounded-xl py-4 text-base font-bold  transition-all disabled:opacity-50"
               style={{
                 background: 'linear-gradient(135deg, #16a34a, #15803d)',
@@ -946,7 +951,7 @@ export default function WalletPage() {
             <CustomAmountInput value={amount} onChange={setAmount} />
             <button
               onClick={openWithdraw}
-              disabled={!amount}
+              disabled={!amount || parseInt(amount, 10) < MIN_WITHDRAW}
               className="w-full rounded-xl py-4 text-base font-bold  transition-all disabled:opacity-50"
               style={{
                 background: 'linear-gradient(135deg, #b45309, #78350f)',
@@ -1241,7 +1246,7 @@ function rejectReasonText(t: ReturnType<typeof useT>, code: string | null | unde
 
 function TxRow({ tx }: { tx: TxRowTx }) {
   const t = useT()
-  const isCredit = tx.type === 'DEPOSIT' || tx.type === 'TRANSFER_IN' || tx.type === 'SYSTEM_REWARD'
+  const isCredit = tx.type === 'DEPOSIT' || tx.type === 'TRANSFER_IN' || tx.type === 'SYSTEM_REWARD' || tx.type === 'REFERRAL_BONUS'
   const sign = isCredit ? '+' : '-'
   const amountColor = isCredit ? '#4ade80' : '#f87171'
 

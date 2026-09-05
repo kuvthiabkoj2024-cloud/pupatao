@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { requireUser } from '~/lib/auth.server'
 import { prisma } from '~/lib/prisma.server'
 import { buildReferralShareUrl, generateUniqueReferralCode } from '~/lib/referral.server'
+import { getReferralConfig } from '~/lib/system-settings.server'
 import { playClick } from '~/hooks/use-sound-engine'
 import { useT } from '~/lib/use-t'
 import { ReferralModal, ReferralsList } from '~/components/ReferralModal'
@@ -39,20 +40,23 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
   const referralShareUrl = buildReferralShareUrl(request, referralCode)
 
-  // Everyone this user has invited. `firstTopupApprovedAt` tells the modal
-  // whether the 10,000 ₭ referral bonus has already paid out for that referee.
-  const referrals = await prisma.user.findMany({
-    where: { referredById: user.id },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true,
-      tel: true,
-      firstName: true,
-      lastName: true,
-      createdAt: true,
-      firstTopupApprovedAt: true,
-    },
-  })
+  // Everyone this user has invited, plus how much commission each has earned
+  // this user so far — the campaign pays on EVERY approved deposit the
+  // referee makes, not just the first.
+  const [referrals, commissionAgg, referralCampaign] = await Promise.all([
+    prisma.user.findMany({
+      where: { referredById: user.id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, tel: true, firstName: true, lastName: true, createdAt: true },
+    }),
+    prisma.transaction.groupBy({
+      by: ['targetUserId'],
+      where: { type: 'REFERRAL_BONUS', userId: user.id },
+      _sum: { amount: true },
+    }),
+    getReferralConfig(),
+  ])
+  const earnedByReferee = new Map(commissionAgg.map(c => [c.targetUserId, c._sum.amount ?? 0]))
 
   return {
     user: {
@@ -69,12 +73,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     bankQrUrl: bank?.qrUrl ?? null,
     referralCode,
     referralShareUrl,
+    referralCampaign: { enabled: referralCampaign.enabled, percent: referralCampaign.percent },
     referrals: referrals.map(r => ({
       id: r.id,
       tel: r.tel,
       name: [r.firstName, r.lastName].filter(Boolean).join(' ') || null,
       joinedAt: r.createdAt.toISOString(),
-      bonusPaid: !!r.firstTopupApprovedAt,
+      totalEarned: earnedByReferee.get(r.id) ?? 0,
     })),
   }
 }
@@ -139,7 +144,7 @@ type AvatarResponse = { url?: string; path?: string; error?: string }
 type BankQrResponse = { url?: string; qrUrl?: string; error?: string }
 
 export default function ProfilePage() {
-  const { user, bankQrUrl, referralCode, referralShareUrl, referrals } = useLoaderData<typeof loader>()
+  const { user, bankQrUrl, referralCode, referralShareUrl, referralCampaign, referrals } = useLoaderData<typeof loader>()
   const actionData = useActionData<typeof action>()
   const navigate = useNavigate()
   const navigation = useNavigation()
@@ -607,6 +612,7 @@ export default function ProfilePage() {
         shareUrl={referralShareUrl}
         code={referralCode ?? ''}
         referrals={referrals}
+        campaign={referralCampaign}
       />
 
       {bankLightbox && (

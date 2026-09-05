@@ -59,8 +59,11 @@ export async function createUserSession(userId: string, request: Request, redire
 }
 
 // Read the cookie, look up the matching (non-revoked, non-expired) session,
-// and return the associated user. Returns null for anonymous visitors.
-export async function getCurrentUser(request: Request): Promise<User | null> {
+// and return the associated user + that session's id. The session id changes
+// on every fresh login (createUserSession always inserts a new Session row),
+// so callers that want "show this once per login, not per page-refresh"
+// (e.g. the referral campaign modal) can key their dismissal state to it.
+export async function getCurrentUserWithSession(request: Request): Promise<{ user: User; sessionId: string } | null> {
   const cookies = parseCookies(request.headers.get('cookie'))
   const raw = cookies[SESSION_COOKIE]
   if (!raw) return null
@@ -94,7 +97,13 @@ export async function getCurrentUser(request: Request): Promise<User | null> {
       .catch(() => { /* ignore */ })
   }
 
-  return session.user
+  return { user: session.user, sessionId: session.id }
+}
+
+// Returns null for anonymous visitors.
+export async function getCurrentUser(request: Request): Promise<User | null> {
+  const result = await getCurrentUserWithSession(request)
+  return result?.user ?? null
 }
 
 // In-memory (per-instance) throttle for the session `lastUsedAt` touch. Returns
