@@ -8,11 +8,19 @@ import { prisma } from '~/lib/prisma.server'
 export async function action({ request }: Route.ActionArgs) {
   await requireAdmin(request)
 
+  // Always resolve with 200 + an empty result on a malformed body instead of
+  // a 4xx. This route is called via a fetcher (admin.live.tsx) purely to
+  // refresh a "nice to have" balance display; with React Router's single-
+  // fetch data protocol, an action that RETURNS a Response with a non-2xx
+  // status gets treated as an error and bubbles to the nearest error
+  // boundary — which, since this component defines none of its own, is the
+  // root one. That took down the entire admin panel every time this fired,
+  // even though the failure itself is completely harmless to ignore.
   let body: { userIds?: unknown }
   try {
     body = await request.json()
   } catch {
-    return Response.json({ error: 'Invalid JSON' }, { status: 400 })
+    return Response.json({ balances: {} })
   }
   const userIds = Array.isArray(body.userIds)
     ? body.userIds.filter((x): x is string => typeof x === 'string').slice(0, 300)
