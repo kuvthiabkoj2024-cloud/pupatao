@@ -1566,7 +1566,9 @@ export default function FishPrawnCrabGame() {
   // Referral modal, opened from the live screen. Data is lazy-loaded on first
   // open so the home loader stays light. Anonymous users go to register first.
   const [referralOpen, setReferralOpen] = useState(false)
-  const referralFetcher = useFetcher<{ code: string; shareUrl: string; referrals: ReferralListItem[]; campaign: ReferralCampaign }>()
+  const referralFetcher = useFetcher<
+    { code: string; shareUrl: string; referrals: ReferralListItem[]; campaign: ReferralCampaign } | { error: string }
+  >()
   const openReferral = useCallback(() => {
     if (isAnonymous) { navigate('/register'); return }
     if (!referralFetcher.data && referralFetcher.state === 'idle') referralFetcher.load('/api/referral')
@@ -4636,8 +4638,11 @@ export default function FishPrawnCrabGame() {
       <JoinGroupModal open={joinGroupOpen} onClose={() => setJoinGroupOpen(false)} />
 
       {/* Referral modal — opened from the live-screen "Invite" button; data is
-          lazy-loaded via /api/referral on first open. */}
-      {referralOpen && referralFetcher.data && (
+          lazy-loaded via /api/referral on first open. Guard on `code` (only
+          present on success) — the endpoint can also return `{ error }` on a
+          DB hiccup, which would otherwise render with undefined props and
+          crash the page. */}
+      {referralOpen && referralFetcher.data && 'code' in referralFetcher.data && (
         <ReferralModal
           open={referralOpen}
           onClose={() => setReferralOpen(false)}

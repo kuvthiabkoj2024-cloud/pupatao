@@ -86,8 +86,21 @@ export async function loader({ request }: Route.LoaderArgs) {
       role: user.role,
     }
     : null
-  const { getCompetitionConfig, getReferralConfig } = await import('./lib/system-settings.server')
-  const [competition, referral] = await Promise.all([getCompetitionConfig(), getReferralConfig()])
+  // Both helpers already fail-safe internally (return a default on a DB
+  // hiccup), but wrap the call anyway — a transient error in the dynamic
+  // import itself, or any future change that removes that internal guard,
+  // would otherwise throw the ENTIRE root loader and drop every page (not
+  // just this one) into the generic error boundary until the next request.
+  let competition = { enabled: false, menuVisible: false }
+  let referral = { enabled: false, percent: 0 }
+  try {
+    const { getCompetitionConfig, getReferralConfig } = await import('./lib/system-settings.server')
+    const [c, r] = await Promise.all([getCompetitionConfig(), getReferralConfig()])
+    competition = c
+    referral = r
+  } catch (err) {
+    console.error('[root loader] competition/referral config fetch failed:', err)
+  }
 
   return {
     user: sessionUser, wallets, locale,
@@ -177,7 +190,7 @@ export default function App({ loaderData }: Route.ComponentProps) {
       {loaderData.user && loaderData.competitionEnabled && (
         <CompetitionBanner />
       )}
-      {loaderData.user && loaderData.sessionId && loaderData.referralCampaign.enabled && (
+      {loaderData.user && loaderData.sessionId && loaderData.referralCampaign?.enabled && (
         <CampaignModal
           sessionId={loaderData.sessionId}
           percent={loaderData.referralCampaign.percent}
@@ -259,7 +272,9 @@ function CompetitionBanner() {
 // a prop and strings are translated directly via `t()`.
 const CAMPAIGN_MODAL_SEEN_KEY = 'pupatao_campaign_modal_seen_for_session'
 
-type ReferralApiResponse = { code: string; shareUrl: string; referrals: ReferralListItem[]; campaign: ReferralCampaign }
+type ReferralApiResponse =
+  | { code: string; shareUrl: string; referrals: ReferralListItem[]; campaign: ReferralCampaign }
+  | { error: string }
 
 function CampaignModal({ sessionId, percent, locale }: { sessionId: string; percent: number; locale: Locale }) {
   const [visible, setVisible] = useState(false)
@@ -339,7 +354,10 @@ function CampaignModal({ sessionId, percent, locale }: { sessionId: string; perc
         </div>
       )}
 
-      {referralOpen && referralFetcher.data && (
+      {/* Guard with `'code' in data` (only present on success) — /api/referral
+          can also return `{ error }` on a DB hiccup, which would otherwise
+          render this with undefined props and crash the page. */}
+      {referralOpen && referralFetcher.data && 'code' in referralFetcher.data && (
         <ReferralModal
           open={referralOpen}
           onClose={() => setReferralOpen(false)}
