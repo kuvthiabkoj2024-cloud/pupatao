@@ -68,9 +68,23 @@ export async function getCurrentAdmin(request: Request): Promise<Admin | null> {
   if (!raw) return null
 
   const tokenHash = hashToken(raw)
+  // This runs on the VERY FIRST thing every single /admin/* request does
+  // (called by requireAdmin, used everywhere) — including right after a
+  // fresh login submit, where React Router revalidates this route's loader.
+  // A transient DB hiccup here (e.g. a cold serverless instance's first-ever
+  // Mongo connection) used to throw uncaught, surfacing as a generic
+  // "Unexpected Server Error" / the root error boundary on literally any
+  // admin page, even a brand-new admin's very first login attempt. Fail
+  // CLOSED instead — treat it the same as "not logged in" (same safe
+  // fallback already used for customers in root.tsx's session lookup).
+  // This never grants access on uncertainty, it just avoids a hard crash;
+  // worst case a legitimately-logged-in admin gets bounced to re-login.
   const session = await prisma.adminSession.findUnique({
     where: { tokenHash },
     include: { admin: true },
+  }).catch(err => {
+    console.error('[getCurrentAdmin] session lookup failed:', err)
+    return null
   })
   if (!session || session.revokedAt) return null
   if (session.expiresAt.getTime() < Date.now()) return null

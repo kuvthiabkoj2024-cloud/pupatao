@@ -69,9 +69,19 @@ export async function getCurrentUserWithSession(request: Request): Promise<{ use
   if (!raw) return null
 
   const tokenHash = hashToken(raw)
+  // Fail CLOSED on a transient DB hiccup (treat as anonymous) rather than
+  // letting it throw. This is called directly, unguarded by their own
+  // try/catch, from many page loaders (history, profile, wallet, login,
+  // register, competition, most api/* routes) — a raw throw here used to
+  // crash the entire page/request into the generic error boundary. Never
+  // grants access on uncertainty; worst case a logged-in user is treated as
+  // signed out for one request.
   const session = await prisma.session.findUnique({
     where: { tokenHash },
     include: { user: true },
+  }).catch(err => {
+    console.error('[getCurrentUserWithSession] session lookup failed:', err)
+    return null
   })
   if (!session || session.revokedAt) return null
   if (session.expiresAt.getTime() < Date.now()) return null
