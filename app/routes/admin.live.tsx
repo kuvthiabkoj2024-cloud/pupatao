@@ -234,6 +234,35 @@ const DEFAULT_BETTING_SECONDS = 60
 export async function loader({ request }: Route.LoaderArgs) {
   await requireAdmin(request)
 
+  // This page revalidates VERY frequently while a round is live (every
+  // bet:placed / round:resolved Pusher event triggers a refetch — see the
+  // component below), so it re-runs this whole block, unguarded, many times
+  // over the course of hosting a round. A single transient Mongo hiccup used
+  // to throw uncaught and take down the entire admin panel (root
+  // ErrorBoundary) right when the admin most needs the page to stay up.
+  // Fail soft to an empty/safe state instead — the realtime feed (Pusher)
+  // keeps the UI filled in regardless, and the next successful revalidate
+  // (or a manual refresh) recovers the rest.
+  try {
+    return await loadLiveData()
+  } catch (err) {
+    console.error('[admin/live loader] failed — rendering safe fallback:', err)
+    return {
+      current: null,
+      currentBets: [],
+      history: [],
+      historyHasMore: false,
+      lastStreamUrl: '',
+      liveStreamUrl: null,
+      schedule: { start: null, end: null, notice: null },
+      savedBettingSeconds: DEFAULT_BETTING_SECONDS,
+      payoutCfg: getPayoutConfig(),
+      livePromo: { sum: process.env.PROMO_SUM === 'true' },
+    }
+  }
+}
+
+async function loadLiveData() {
   // The most recent round that is still in flight, if any.
   const current = await prisma.gameRound.findFirst({
     where: { mode: 'LIVE', status: { in: ['BETTING', 'LOCKED', 'AWAITING_RESULT'] } },

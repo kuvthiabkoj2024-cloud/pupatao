@@ -24,15 +24,29 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   // Pending TX badge: deposits + withdraws awaiting approval.
   // Pending bets badge: bets attached to the currently-open LIVE round (BETTING phase only).
-  const [pendingTx, openLiveRound] = await Promise.all([
-    prisma.transaction.count({
-      where: { type: { in: ['DEPOSIT', 'WITHDRAW'] }, status: 'PENDING' },
-    }),
-    prisma.gameRound.findFirst({
-      where: { mode: 'LIVE', status: 'BETTING' },
-      select: { id: true, _count: { select: { bets: true } } },
-    }),
-  ])
+  //
+  // This layout loader re-runs on every /admin/* navigation AND on every
+  // throttled Pusher revalidate() while hosting a live round (bet:placed,
+  // round:resolved, etc — see throttledRevalidate below) — i.e. very
+  // frequently during exactly the "stay on the live page" scenario. A
+  // transient DB hiccup here used to throw uncaught and take down the WHOLE
+  // admin panel (this loader wraps every admin route) into the generic error
+  // boundary. Fail soft to stale/zero badge counts instead.
+  let pendingTx = 0
+  let openLiveRound: { id: string; _count: { bets: number } } | null = null
+  try {
+    ;[pendingTx, openLiveRound] = await Promise.all([
+      prisma.transaction.count({
+        where: { type: { in: ['DEPOSIT', 'WITHDRAW'] }, status: 'PENDING' },
+      }),
+      prisma.gameRound.findFirst({
+        where: { mode: 'LIVE', status: 'BETTING' },
+        select: { id: true, _count: { select: { bets: true } } },
+      }),
+    ])
+  } catch (err) {
+    console.error('[admin layout loader] badge counts failed:', err)
+  }
 
   return {
     admin: {
