@@ -1595,7 +1595,7 @@ export default function FishPrawnCrabGame() {
   const [currentSumBets, setCurrentSumBets] = useState<{ sum: number; amount: number }[]>([])
   const [currentPairBets, setCurrentPairBets] = useState<PairBet[]>([])
   const [pendingCell, setPendingCell] = useState<number | null>(null)
-  const [selectedChip, setSelectedChip] = useState(5_000)
+  const [selectedChip, setSelectedChip] = useState(CHIP_CONFIG[0].value)
   const [resultModal, setResultModal] = useState<{
     win: number; betTotal: number; newBalance: number; dice: SymbolKey[]; diceSum: number
     symbolResults: { symbol: SymbolKey; amount: number; payout: number; won: boolean }[]
