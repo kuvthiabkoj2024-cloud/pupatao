@@ -8,4 +8,14 @@ export default {
   // build/server/index.js that `react-router-serve` (bun run start) can run —
   // needed to test the production build + service worker over ngrok.
   presets: process.env.VERCEL ? [vercelPreset()] : [],
+  // React Router's built-in CSRF guard rejects every POST action (login,
+  // logout, uploads, admin actions — ALL of them, regardless of route) with a
+  // generic 400 "Bad Request" whenever the request's Origin header doesn't
+  // match the Host header it sees. In the Docker/reverse-proxy deployment
+  // (pupatao.com → Cloudflare → proxy → container), the proxy doesn't
+  // necessarily forward the original host as-is, so the two never matched —
+  // this is what caused every single form submission and fetcher action to
+  // fail identically on the production Docker deploy. Vercel wasn't affected
+  // because its own edge network sets these headers consistently.
+  allowedActionOrigins: ["pupatao.com"],
 } satisfies Config
