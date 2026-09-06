@@ -17,5 +17,11 @@ export default {
   // this is what caused every single form submission and fetcher action to
   // fail identically on the production Docker deploy. Vercel wasn't affected
   // because its own edge network sets these headers consistently.
-  allowedActionOrigins: ["pupatao.com"],
+  // "null" is included because some mobile browsers send a literal
+  // `Origin: null` header for POST requests made from an installed/standalone
+  // PWA (as opposed to a normal browser tab, which sends the real origin) —
+  // observed specifically on live betting (/api/play-round) from a
+  // home-screen-installed instance of this app. React Router treats that
+  // string as a real (mismatching) origin, not as "no origin sent".
+  allowedActionOrigins: ["pupatao.com", "null"],
 } satisfies Config
