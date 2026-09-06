@@ -150,10 +150,14 @@ export async function logout(request: Request, redirectTo = '/login') {
   const raw = cookies[SESSION_COOKIE]
   if (raw) {
     const tokenHash = hashToken(raw)
+    // Best-effort — the cookie gets cleared below regardless, so the
+    // browser is logged out either way. A DB hiccup here shouldn't crash
+    // the logout action; worst case the token just outlives this request
+    // until its own TTL expiry.
     await prisma.session.updateMany({
       where: { tokenHash, revokedAt: null },
       data: { revokedAt: new Date() },
-    })
+    }).catch(err => console.error('[logout] session revoke failed:', err))
   }
   return redirect(redirectTo, {
     headers: { 'Set-Cookie': buildSetCookie('', 0) },

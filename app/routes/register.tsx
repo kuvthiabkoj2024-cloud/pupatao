@@ -62,7 +62,8 @@ export async function action({ request }: Route.ActionArgs) {
       createdAt: user.createdAt.toISOString(),
     })
 
-    return createUserSession(user.id, request, next)
+    // MUST be awaited — see the identical note in login.tsx.
+    return await createUserSession(user.id, request, next)
   } catch (err) {
     console.error('[register]', err)
     const isConn =

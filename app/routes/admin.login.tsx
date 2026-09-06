@@ -29,7 +29,8 @@ export async function action({ request }: Route.ActionArgs) {
     const ok = await verifyAdminPassword(password, admin.passwordHash)
     if (!ok) return { error: 'admin.login.error.invalidCredentials' as const }
 
-    return createAdminSession(admin.id, request, next)
+    // MUST be awaited — see the identical note in routes/login.tsx.
+    return await createAdminSession(admin.id, request, next)
   } catch (err) {
     console.error('[admin/login]', err)
     const isConn =

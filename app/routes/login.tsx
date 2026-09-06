@@ -31,7 +31,11 @@ export async function action({ request }: Route.ActionArgs) {
     const ok = await verifyPassword(password, user.passwordHash)
     if (!ok) return { error: 'Invalid phone number or password.' }
 
-    return createUserSession(user.id, request, next)
+    // MUST be awaited — `return createUserSession(...)` returns the pending
+    // promise immediately, exiting this try block before it settles, so a
+    // later rejection (e.g. the DB write failing) would bypass the catch
+    // below entirely and throw uncaught instead of showing a normal error.
+    return await createUserSession(user.id, request, next)
   } catch (err) {
     console.error('[login]', err)
     const isConn =

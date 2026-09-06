@@ -133,10 +133,11 @@ export async function adminLogout(request: Request, redirectTo = '/admin/login')
   const raw = cookies[ADMIN_COOKIE]
   if (raw) {
     const tokenHash = hashToken(raw)
+    // Best-effort — see the identical note in auth.server.ts's logout().
     await prisma.adminSession.updateMany({
       where: { tokenHash, revokedAt: null },
       data: { revokedAt: new Date() },
-    })
+    }).catch(err => console.error('[adminLogout] session revoke failed:', err))
   }
   return redirect(redirectTo, {
     headers: { 'Set-Cookie': buildSetCookie('', 0) },
