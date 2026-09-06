@@ -8,7 +8,6 @@
     "build": "prisma generate && react-router build",
     "start": "react-router-serve ./build/server/index.js",
     "start:local": "node --env-file=.env ./node_modules/.bin/react-router-serve ./build/server/index.js",
-    "start:debug": "node server.js",
     "typecheck": "react-router typegen && tsc",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",

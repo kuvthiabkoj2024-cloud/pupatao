@@ -23,5 +23,5 @@ export default {
   // observed specifically on live betting (/api/play-round) from a
   // home-screen-installed instance of this app. React Router treats that
   // string as a real (mismatching) origin, not as "no origin sent".
-  allowedActionOrigins: ["pupatao.com", "null"],
+  allowedActionOrigins: ["pupatao.com", "www.pupatao.com", "null"],
 } satisfies Config
