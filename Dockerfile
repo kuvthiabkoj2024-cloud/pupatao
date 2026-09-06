@@ -48,8 +48,13 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/server.js ./server.js
 
 EXPOSE 5176
 # DATABASE_URL and other secrets are injected at runtime (docker run -e ...),
 # NOT baked into the image.
-CMD ["npm", "run", "start"]
+# TEMPORARY: swapped to the diagnostic server (see server.js) to capture the
+# real Origin/Host headers behind the mobile-PWA CSRF false-positive. Revert
+# to `["npm", "run", "start"]` (and delete server.js) once that's root-caused
+# and the permanent fix in react-router.config.ts is confirmed.
+CMD ["npm", "run", "start:debug"]
