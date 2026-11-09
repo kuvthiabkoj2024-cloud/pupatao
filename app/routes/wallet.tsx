@@ -18,7 +18,7 @@ import { ClaimTransferModal } from '~/components/ClaimTransferModal'
 import { ConfirmDialog } from '~/components/ConfirmDialog'
 import { withdrawFee, MAX_WITHDRAW_PER_DAY } from '~/lib/withdraw-fee'
 import { registeredFromSameIp, SAME_IP_TRANSFER_ERROR } from '~/lib/linked-accounts.server'
-import { forfeitPromo, restorePromo, senderHasFreshDeposit, transferForfeitKey, TRANSFER_FORFEIT_NOTE, forfeitPromoForWithdraw, getTurnoverStatus, releaseReferralCommissionsAndNotify, turnoverBlockedMessage } from '~/lib/turnover.server'
+import { forfeitPromo, restorePromo, senderHasFreshDeposit, transferForfeitKey, TRANSFER_FORFEIT_NOTE, forfeitPromoForWithdraw, getTurnoverStatus, releaseReferralCommissionsAndNotify, turnoverBlockedMessage, withdrawBlocked, WITHDRAW_NEEDS_BET_MESSAGE } from '~/lib/turnover.server'
 import { useT } from '~/lib/use-t'
 
 const HIDDEN = '••••••'
@@ -326,9 +326,10 @@ export async function action({ request }: Route.ActionArgs) {
       if (!wallet) return { op, error: 'Real wallet not found.' }
       if (!bank) return { op, error: 'Add your bank QR code before withdrawing.' }
 
-      // Anti-abuse: deposited money must be played through before it leaves.
+      // Anti-abuse: after a deposit, at least one REAL bet before withdrawing
+      // (transfers require full turnover — see transferGeneral/transferLocked).
       const turnover = await getTurnoverStatus(user.id)
-      if (turnover.remaining > 0) return { op, error: turnoverBlockedMessage(turnover) }
+      if (withdrawBlocked(turnover)) return { op, error: WITHDRAW_NEEDS_BET_MESSAGE }
 
       // Per-day cap: completed + pending withdrawals today + this request ≤ 10,000,000 ₭.
       const withdrawnToday = todayWithdrawAgg._sum.amount ?? 0
@@ -825,7 +826,9 @@ export default function WalletPage() {
   }
 
   const turnover = loaderData.turnover
-  const turnoverMsg = `ທ່ານຕ້ອງຫຼິ້ນ (ວາງເດີມພັນ) ຈາກຍອດເງິນຝາກໃຫ້ຄົບກ່ອນ ຈຶ່ງຈະຖອນ ຫຼື ໂອນເງິນໄດ້. ຍັງເຫຼືອອີກ ${turnover.remaining.toLocaleString()} ₭.`
+  const turnoverMsg = `ທ່ານຕ້ອງຫຼິ້ນ (ວາງເດີມພັນ) ຈາກຍອດເງິນຝາກໃຫ້ຄົບກ່ອນ ຈຶ່ງຈະໂອນເງິນໄດ້. ຍັງເຫຼືອອີກ ${turnover.remaining.toLocaleString()} ₭.`
+  // Withdraw only needs ONE settled REAL bet since the deposit (transfer needs full turnover).
+  const withdrawNeedsBet = turnover.required > 0 && turnover.settledBets === 0
 
   function openWithdraw() {
     playClick()
@@ -833,7 +836,7 @@ export default function WalletPage() {
     if (!val) return showError(t('wallet.errEnterAmount'))
     if (val < MIN_WITHDRAW) return showError(t('wallet.errMin', { amount: MIN_WITHDRAW.toLocaleString() }))
     if (val > MAX_WITHDRAW) return showError(t('wallet.errMax', { amount: MAX_WITHDRAW.toLocaleString() }))
-    if (loaderData.turnover.remaining > 0) return showError(turnoverMsg)
+    if (withdrawNeedsBet) return showError('ທ່ານຕ້ອງຫຼິ້ນ (ວາງເດີມພັນ) ດ້ວຍຍອດເງິນຈິງຢ່າງໜ້ອຍ 1 ຄັ້ງ ຫຼັງຈາກຝາກເງິນ ຈຶ່ງຈະຖອນໄດ້.')
     const pendingTotal = loaderData.pendingWithdrawTotal
     const effectiveBalance = loaderData.balance - pendingTotal
     if (val > effectiveBalance) {
@@ -1006,25 +1009,12 @@ export default function WalletPage() {
         {/* ─── Withdraw form ────────────────────────────────────────── */}
         {tab === 'withdraw' && (
           <div className="flex flex-col gap-4">
-            {/* Turnover requirement — deposits must be played through before withdraw/transfer. */}
-            {turnover.required > 0 && (
-              <div className="flex flex-col gap-2 rounded-xl px-4 py-3 text-sm"
-                style={turnover.remaining > 0
-                  ? { background: 'rgba(127,29,29,0.25)', border: '1px solid rgba(248,113,113,0.5)', color: '#fca5a5' }
-                  : { background: 'rgba(6,78,59,0.25)', border: '1px solid rgba(52,211,153,0.5)', color: '#6ee7b7' }}>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-bold">{turnover.remaining > 0 ? '🔒 ຍອດຫຼິ້ນທີ່ຕ້ອງການກ່ອນຖອນ' : '✅ ຍອດຫຼິ້ນຄົບແລ້ວ — ຖອນໄດ້'}</span>
-                  <span className="tabular-nums">{Math.min(turnover.wagered, turnover.required).toLocaleString()} / {turnover.required.toLocaleString()} ₭</span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full" style={{ background: 'rgba(0,0,0,0.35)' }}>
-                  <div className="h-full rounded-full" style={{
-                    width: `${Math.min(100, Math.round((turnover.wagered / turnover.required) * 100))}%`,
-                    background: turnover.remaining > 0 ? '#f87171' : '#34d399',
-                  }} />
-                </div>
-                {turnover.remaining > 0 && (
-                  <span className="text-xs">ຍອດເງິນຝາກຕ້ອງຖືກນຳໄປຫຼິ້ນຢ່າງໜ້ອຍ 1 ເທົ່າ ກ່ອນຈະຖອນ ຫຼື ໂອນໄດ້. ຍັງເຫຼືອອີກ <strong>{turnover.remaining.toLocaleString()} ₭</strong>.</span>
-                )}
+            {/* Withdraw rule — at least one REAL bet since the last deposit. */}
+            {withdrawNeedsBet && (
+              <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm"
+                style={{ background: 'rgba(127,29,29,0.25)', border: '1px solid rgba(248,113,113,0.5)', color: '#fca5a5' }}>
+                <span className="text-base">🔒</span>
+                <span>ກະລຸນາຫຼິ້ນ (ວາງເດີມພັນ) ດ້ວຍຍອດເງິນຈິງຢ່າງໜ້ອຍ <strong>1 ຄັ້ງ</strong> ຫຼັງຈາກຝາກເງິນ ຈຶ່ງຈະຖອນໄດ້.</span>
               </div>
             )}
             {loaderData.promoBalance > 0 && (
@@ -1060,6 +1050,27 @@ export default function WalletPage() {
         {/* ─── Transfer form + pending lists ────────────────────────── */}
         {tab === 'transfer' && (
           <div className="flex flex-col gap-4">
+            {/* Turnover requirement — deposits must be played through 1× before transferring. */}
+            {turnover.required > 0 && (
+              <div className="flex flex-col gap-2 rounded-xl px-4 py-3 text-sm"
+                style={turnover.remaining > 0
+                  ? { background: 'rgba(127,29,29,0.25)', border: '1px solid rgba(248,113,113,0.5)', color: '#fca5a5' }
+                  : { background: 'rgba(6,78,59,0.25)', border: '1px solid rgba(52,211,153,0.5)', color: '#6ee7b7' }}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold">{turnover.remaining > 0 ? '🔒 ຍອດຫຼິ້ນທີ່ຕ້ອງການກ່ອນໂອນ' : '✅ ຍອດຫຼິ້ນຄົບແລ້ວ — ໂອນໄດ້'}</span>
+                  <span className="tabular-nums">{Math.min(turnover.wagered, turnover.required).toLocaleString()} / {turnover.required.toLocaleString()} ₭</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full" style={{ background: 'rgba(0,0,0,0.35)' }}>
+                  <div className="h-full rounded-full" style={{
+                    width: `${Math.min(100, Math.round((turnover.wagered / turnover.required) * 100))}%`,
+                    background: turnover.remaining > 0 ? '#f87171' : '#34d399',
+                  }} />
+                </div>
+                {turnover.remaining > 0 && (
+                  <span className="text-xs">ຍອດເງິນຝາກຕ້ອງຖືກນຳໄປຫຼິ້ນຢ່າງໜ້ອຍ 1 ເທົ່າ ກ່ອນຈະໂອນໄດ້. ຍັງເຫຼືອອີກ <strong>{turnover.remaining.toLocaleString()} ₭</strong>.</span>
+                )}
+              </div>
+            )}
             {turnover.required > 0 && (
               <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-xs"
                 style={{ background: 'rgba(91,33,182,0.2)', border: '1px solid rgba(196,181,253,0.45)', color: '#c4b5fd' }}>
