@@ -17,6 +17,13 @@ services:
       replicas: 2
     networks:
       - pupatao-share-network
+    # MongoDB runs on the droplet itself (not in Docker). Inside a container
+    # "localhost" is the container, so this maps host.docker.internal → the
+    # droplet. DATABASE_URL must use host.docker.internal + directConnection=true
+    # (the replica set member is registered as localhost:27017, which would
+    # otherwise point back at the container).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - .env
     environment:
