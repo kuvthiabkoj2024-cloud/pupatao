@@ -8,11 +8,14 @@
 // stake is debited in the same transaction that records the round, before the
 // client ever sees the dice, so every roll is paid for.
 //
-// Phase rules (unchanged from pick-dice):
-//   • ADMIN_LOCKED, PROMO wallet, sleep mode → zero-payout dice
-//   • REAL_LIVE competition participants → REAL self-play refused
-//   • otherwise resolveAndAdvancePhase → adversarial dice for that phase
-//   • DEMO → NORMAL phase, no phase/sleep logic
+// Dice rules — identical order to the original pick-dice:
+//   1. ADMIN_LOCKED → zero-payout dice
+//   2. PROMO wallet → zero-payout dice
+//   3. REAL + REAL_LIVE competition participant → 403
+//   4. sleep mode → zero-payout dice
+//   5. otherwise resolveAndAdvancePhase → adversarial dice for that phase
+//   any lookup error in 1–5 → PHASE_A odds
+//   DEMO → NORMAL phase, none of the above
 import type { BetResult, SelfPlayPhase } from '@prisma/client'
 import { prisma } from '~/lib/prisma.server'
 import { notifyAdmin, notifyCompetition, notifyUser } from '~/lib/pusher.server'
@@ -25,8 +28,6 @@ import {
 import { SELF_PLAY_ENABLED } from '~/lib/features'
 
 type WalletKey = 'DEMO' | 'REAL' | 'PROMO'
-
-const MAX_STAKE_PER_ROLL = 10_000_000
 
 class InsufficientBalanceError extends Error {}
 
@@ -91,7 +92,6 @@ export async function action({ request }: { request: Request }) {
     rangeBets.reduce((s, b) => s + b.amount, 0) +
     pairBets.reduce((s, b) => s + b.amount, 0)
   if (totalStake <= 0) return Response.json({ error: 'No bets placed.' }, { status: 400 })
-  if (totalStake > MAX_STAKE_PER_ROLL) return Response.json({ error: 'Round stake exceeds limit.' }, { status: 400 })
 
   const cfg = getPayoutConfig()
 
@@ -111,49 +111,62 @@ export async function action({ request }: { request: Request }) {
     let forceZero = false
     let phase: SelfPlayPhase = 'NORMAL'
 
+    // Same order and same error handling as the original /api/pick-dice:
+    //   ADMIN_LOCKED → zero, PROMO → zero, REAL_LIVE participant → 403,
+    //   sleep mode → zero, otherwise resolve phase. ANY lookup error in this
+    //   block falls back to PHASE_A odds (the roll still happens).
     if (walletKey !== 'DEMO') {
-      const userRecord = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { selfPlayPhase: true, selfPlayPhaseBalance: true },
-      })
+      let blocked: Response | null = null
+      try {
+        const userRecord = await prisma.user.findUnique({
+          where: { id: user.id },
+          select: { selfPlayPhase: true, selfPlayPhaseBalance: true },
+        })
 
-      if (walletKey === 'REAL') {
-        const { getCompetitionConfig } = await import('~/lib/system-settings.server')
-        const competition = await getCompetitionConfig()
-        if (competition.enabled && competition.type === 'REAL_LIVE') {
-          const participant = await prisma.competitionParticipant.findUnique({ where: { userId: user.id } })
-          if (participant) {
-            return Response.json({ error: 'Real wallet is restricted to live mode during this competition.' }, { status: 403 })
-          }
-        }
-      }
-
-      if (userRecord?.selfPlayPhase === 'ADMIN_LOCKED' || walletKey === 'PROMO') {
-        forceZero = true
-      } else {
-        const { getSleepMode } = await import('~/lib/system-settings.server')
-        if (await getSleepMode()) {
+        if (userRecord?.selfPlayPhase === 'ADMIN_LOCKED') {
+          forceZero = true
+        } else if (walletKey === 'PROMO') {
           forceZero = true
         } else {
-          try {
-            const { getPlayerGameState } = await import('~/lib/player-winnings.server')
-            const { resolveAndAdvancePhase } = await import('~/lib/self-play-phase.server')
-            const gameState = await getPlayerGameState(user.id)
-            if (userRecord) {
-              const resolved = await resolveAndAdvancePhase(
-                user.id,
-                { phase: userRecord.selfPlayPhase, phaseEntryBalance: userRecord.selfPlayPhaseBalance },
-                wallet.balance,
-                gameState.netProfit,
-                gameState.lastDepositAmount,
-              )
-              phase = resolved.phase
+          if (walletKey === 'REAL') {
+            const { getCompetitionConfig } = await import('~/lib/system-settings.server')
+            const competition = await getCompetitionConfig()
+            if (competition.enabled && competition.type === 'REAL_LIVE') {
+              const participant = await prisma.competitionParticipant.findUnique({ where: { userId: user.id } })
+              if (participant) {
+                blocked = Response.json({ error: 'Real wallet is restricted to live mode during this competition.' }, { status: 403 })
+              }
             }
-          } catch {
-            phase = 'PHASE_A' // fail closed: lower win rate if phase lookup breaks
+          }
+
+          if (!blocked) {
+            const { getSleepMode } = await import('~/lib/system-settings.server')
+            if (await getSleepMode()) {
+              forceZero = true
+            } else {
+              const { getPlayerGameState } = await import('~/lib/player-winnings.server')
+              const { resolveAndAdvancePhase } = await import('~/lib/self-play-phase.server')
+              const [gameState, freshWallet] = await Promise.all([
+                getPlayerGameState(user.id),
+                prisma.wallet.findUnique({ where: { id: wallet.id }, select: { balance: true } }),
+              ])
+              if (userRecord) {
+                const resolved = await resolveAndAdvancePhase(
+                  user.id,
+                  { phase: userRecord.selfPlayPhase, phaseEntryBalance: userRecord.selfPlayPhaseBalance },
+                  freshWallet?.balance ?? 0,
+                  gameState.netProfit,
+                  gameState.lastDepositAmount,
+                )
+                phase = resolved.phase
+              }
+            }
           }
         }
+      } catch {
+        phase = 'PHASE_A'
       }
+      if (blocked) return blocked
     }
 
     dice = forceZero
